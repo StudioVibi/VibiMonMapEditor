@@ -35,8 +35,11 @@ let pointer_drag:
       base_offset_y: number;
     }
   | {
-      kind: "paint";
-      last_cell: string;
+      kind: "paint_rect";
+      start_x: number;
+      start_y: number;
+      end_x: number;
+      end_y: number;
     }
   | {
       kind: "rubber_rect";
@@ -92,6 +95,13 @@ function sprite_id(name: string, ix: number, iy: number): string {
   return `${name}_${pad_x}_${pad_y}`;
 }
 
+function building_preview_asset(name: string): string {
+  if (name.startsWith("icon_") || name === "tile_mountain_door") {
+    return `VibiMon/assets/${name}.png`;
+  }
+  return `VibiMon/assets/${sprite_id(name, 0, 0)}.png`;
+}
+
 function preview_asset(token: T.GlyphToken): string {
   if (token.token === "::") {
     return "VibiMon/assets/tile_grass_00_00.png";
@@ -106,10 +116,7 @@ function preview_asset(token: T.GlyphToken): string {
   }
 
   if (token.kind === "building") {
-    if (token.name.startsWith("icon_")) {
-      return `VibiMon/assets/${token.name}.png`;
-    }
-    return `VibiMon/assets/${sprite_id(token.name, 0, 0)}.png`;
+    return building_preview_asset(token.name);
   }
 
   return "VibiMon/assets/tile_grass_00_00.png";
@@ -336,12 +343,16 @@ function on_visual_pointer_down(ev: PointerEvent): void {
     if (!state.selected_token) {
       return;
     }
-    Tools.apply_paint_at(state.grid, cell.x, cell.y, state.selected_token);
     pointer_drag = {
-      kind: "paint",
-      last_cell: cell_key(cell.x, cell.y)
+      kind: "paint_rect",
+      start_x: cell.x,
+      start_y: cell.y,
+      end_x: cell.x,
+      end_y: cell.y
     };
-    sync_grid_and_views();
+    const rect = St.normalize_rect(cell.x, cell.y, cell.x, cell.y);
+    visual.set_selection(rect);
+    paint_preview_for_cell(null);
     return;
   }
 
@@ -417,19 +428,21 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     return;
   }
 
-  if (pointer_drag.kind === "paint") {
+  if (pointer_drag.kind === "paint_rect") {
     if (!state.selected_token) {
       return;
     }
-    const key = cell_key(cell.x, cell.y);
-    if (key === pointer_drag.last_cell) {
-      return;
-    }
-    pointer_drag.last_cell = key;
-    Tools.apply_paint_at(state.grid, cell.x, cell.y, state.selected_token);
-    sync_grid_and_views();
+    pointer_drag.end_x = cell.x;
+    pointer_drag.end_y = cell.y;
+    const rect = St.normalize_rect(
+      pointer_drag.start_x,
+      pointer_drag.start_y,
+      pointer_drag.end_x,
+      pointer_drag.end_y
+    );
+    visual.set_selection(rect);
     clear_move_preview();
-    paint_preview_for_cell(cell);
+    paint_preview_for_cell(null);
     return;
   }
 
@@ -514,7 +527,19 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     return;
   }
 
-  if (pointer_drag.kind === "paint") {
+  if (pointer_drag.kind === "paint_rect") {
+    const token = state.selected_token;
+    if (token) {
+      const rect = St.normalize_rect(
+        pointer_drag.start_x,
+        pointer_drag.start_y,
+        pointer_drag.end_x,
+        pointer_drag.end_y
+      );
+      Tools.apply_paint_rect(state.grid, rect, token);
+      sync_grid_and_views();
+    }
+    visual.set_selection(null);
     pointer_drag = null;
     clear_move_preview();
     visual.set_paint_preview(null);

@@ -8,6 +8,13 @@ function sprite_id(name: string, ix: number, iy: number): string {
   return `${name}_${pad_x}_${pad_y}`;
 }
 
+function building_asset(name: string, ix: number, iy: number): string {
+  if (name.startsWith("icon_") || name === "tile_mountain_door") {
+    return `VibiMon/assets/${name}.png`;
+  }
+  return `VibiMon/assets/${sprite_id(name, ix, iy)}.png`;
+}
+
 function border_id(
   name: string,
   up: boolean,
@@ -120,16 +127,13 @@ function floor_asset(
   }
 
   if (def.kind === "building") {
-    if (def.name.startsWith("icon_")) {
-      return `VibiMon/assets/${def.name}.png`;
-    }
     if (def.width > 1 || def.height > 1) {
       const [ox, oy] = top_left_of_block(grid, x, y, tok);
       const ix = (x - ox) % def.width;
       const iy = (y - oy) % def.height;
-      return `VibiMon/assets/${sprite_id(def.name, ix, iy)}.png`;
+      return building_asset(def.name, ix, iy);
     }
-    return `VibiMon/assets/${sprite_id(def.name, 0, 0)}.png`;
+    return building_asset(def.name, 0, 0);
   }
 
   if (def.kind === "marker") {

@@ -411,6 +411,13 @@ function apply_paint_at(grid, x, y, token) {
   }
   grid_set(grid, x, y, next);
 }
+function apply_paint_rect(grid, rect, token) {
+  for (let y = rect.y;y < rect.y + rect.h; y++) {
+    for (let x = rect.x;x < rect.x + rect.w; x++) {
+      apply_paint_at(grid, x, y, token);
+    }
+  }
+}
 function apply_erase_at(grid, x, y) {
   if (!in_bounds(grid, x, y)) {
     return;
@@ -488,6 +495,12 @@ function sprite_id(name, ix, iy) {
   const pad_x = String(ix).padStart(2, "0");
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}`;
+}
+function building_asset(name, ix, iy) {
+  if (name.startsWith("icon_") || name === "tile_mountain_door") {
+    return `VibiMon/assets/${name}.png`;
+  }
+  return `VibiMon/assets/${sprite_id(name, ix, iy)}.png`;
 }
 function border_id(name, up, dw, lf, rg, up_lf, up_rg, dw_lf, dw_rg) {
   const base = `${name}_`;
@@ -576,16 +589,13 @@ function floor_asset(grid, x, y, token_map2) {
     return `VibiMon/assets/${id}.png`;
   }
   if (def.kind === "building") {
-    if (def.name.startsWith("icon_")) {
-      return `VibiMon/assets/${def.name}.png`;
-    }
     if (def.width > 1 || def.height > 1) {
       const [ox, oy] = top_left_of_block(grid, x, y, tok);
       const ix = (x - ox) % def.width;
       const iy = (y - oy) % def.height;
-      return `VibiMon/assets/${sprite_id(def.name, ix, iy)}.png`;
+      return building_asset(def.name, ix, iy);
     }
-    return `VibiMon/assets/${sprite_id(def.name, 0, 0)}.png`;
+    return building_asset(def.name, 0, 0);
   }
   if (def.kind === "marker") {
     return "VibiMon/assets/tile_grass_00_00.png";
@@ -687,6 +697,12 @@ function sprite_id2(name, ix, iy) {
   const pad_x = String(ix).padStart(2, "0");
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}`;
+}
+function building_asset2(name, ix, iy) {
+  if (name.startsWith("icon_") || name === "tile_mountain_door") {
+    return `VibiMon/assets/${name}.png`;
+  }
+  return `VibiMon/assets/${sprite_id2(name, ix, iy)}.png`;
 }
 function create_visual_renderer(stage_el, grid_el, overlay_el) {
   const tile_dom = new Map;
@@ -874,13 +890,7 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
-          if (token.name.startsWith("icon_")) {
-            floor.src = `VibiMon/assets/${token.name}.png`;
-          } else if (token.width > 1 || token.height > 1) {
-            floor.src = `VibiMon/assets/${sprite_id2(token.name, ix, iy)}.png`;
-          } else {
-            floor.src = `VibiMon/assets/${sprite_id2(token.name, 0, 0)}.png`;
-          }
+          floor.src = token.width > 1 || token.height > 1 ? building_asset2(token.name, ix, iy) : building_asset2(token.name, 0, 0);
           tile.appendChild(floor);
         } else if (token.kind === "bordered") {
           const floor = document.createElement("img");
@@ -940,9 +950,6 @@ var token_filter = "";
 var raw_timer = null;
 var is_space_down = false;
 var pointer_drag = null;
-function cell_key2(x, y) {
-  return `${x},${y}`;
-}
 function in_rect(x, y, rect) {
   return x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h;
 }
@@ -960,6 +967,12 @@ function sprite_id3(name, ix, iy) {
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}`;
 }
+function building_preview_asset(name) {
+  if (name.startsWith("icon_") || name === "tile_mountain_door") {
+    return `VibiMon/assets/${name}.png`;
+  }
+  return `VibiMon/assets/${sprite_id3(name, 0, 0)}.png`;
+}
 function preview_asset(token) {
   if (token.token === "::") {
     return "VibiMon/assets/tile_grass_00_00.png";
@@ -971,10 +984,7 @@ function preview_asset(token) {
     return `VibiMon/assets/${token.name}_center.png`;
   }
   if (token.kind === "building") {
-    if (token.name.startsWith("icon_")) {
-      return `VibiMon/assets/${token.name}.png`;
-    }
-    return `VibiMon/assets/${sprite_id3(token.name, 0, 0)}.png`;
+    return building_preview_asset(token.name);
   }
   return "VibiMon/assets/tile_grass_00_00.png";
 }
@@ -1163,12 +1173,16 @@ function on_visual_pointer_down(ev) {
     if (!state.selected_token) {
       return;
     }
-    apply_paint_at(state.grid, cell.x, cell.y, state.selected_token);
     pointer_drag = {
-      kind: "paint",
-      last_cell: cell_key2(cell.x, cell.y)
+      kind: "paint_rect",
+      start_x: cell.x,
+      start_y: cell.y,
+      end_x: cell.x,
+      end_y: cell.y
     };
-    sync_grid_and_views();
+    const rect = normalize_rect(cell.x, cell.y, cell.x, cell.y);
+    visual.set_selection(rect);
+    paint_preview_for_cell(null);
     return;
   }
   if (state.tool === "rubber") {
@@ -1235,19 +1249,16 @@ function on_visual_pointer_move(ev) {
     paint_preview_for_cell(null);
     return;
   }
-  if (pointer_drag.kind === "paint") {
+  if (pointer_drag.kind === "paint_rect") {
     if (!state.selected_token) {
       return;
     }
-    const key = cell_key2(cell.x, cell.y);
-    if (key === pointer_drag.last_cell) {
-      return;
-    }
-    pointer_drag.last_cell = key;
-    apply_paint_at(state.grid, cell.x, cell.y, state.selected_token);
-    sync_grid_and_views();
+    pointer_drag.end_x = cell.x;
+    pointer_drag.end_y = cell.y;
+    const rect2 = normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y);
+    visual.set_selection(rect2);
     clear_move_preview();
-    paint_preview_for_cell(cell);
+    paint_preview_for_cell(null);
     return;
   }
   if (pointer_drag.kind === "rubber_rect") {
@@ -1312,7 +1323,14 @@ function on_visual_pointer_up(ev) {
     visual.set_paint_preview(null);
     return;
   }
-  if (pointer_drag.kind === "paint") {
+  if (pointer_drag.kind === "paint_rect") {
+    const token = state.selected_token;
+    if (token) {
+      const rect = normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y);
+      apply_paint_rect(state.grid, rect, token);
+      sync_grid_and_views();
+    }
+    visual.set_selection(null);
     pointer_drag = null;
     clear_move_preview();
     visual.set_paint_preview(null);

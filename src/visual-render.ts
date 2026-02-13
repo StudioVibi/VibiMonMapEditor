@@ -104,6 +104,13 @@ function sprite_id(name: string, ix: number, iy: number): string {
   return `${name}_${pad_x}_${pad_y}`;
 }
 
+function building_asset(name: string, ix: number, iy: number): string {
+  if (name.startsWith("icon_") || name === "tile_mountain_door") {
+    return `VibiMon/assets/${name}.png`;
+  }
+  return `VibiMon/assets/${sprite_id(name, ix, iy)}.png`;
+}
+
 export function create_visual_renderer(
   stage_el: HTMLDivElement,
   grid_el: HTMLDivElement,
@@ -327,13 +334,10 @@ export function create_visual_renderer(
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
-          if (token.name.startsWith("icon_")) {
-            floor.src = `VibiMon/assets/${token.name}.png`;
-          } else if (token.width > 1 || token.height > 1) {
-            floor.src = `VibiMon/assets/${sprite_id(token.name, ix, iy)}.png`;
-          } else {
-            floor.src = `VibiMon/assets/${sprite_id(token.name, 0, 0)}.png`;
-          }
+          floor.src =
+            token.width > 1 || token.height > 1
+              ? building_asset(token.name, ix, iy)
+              : building_asset(token.name, 0, 0);
           tile.appendChild(floor);
         } else if (token.kind === "bordered") {
           const floor = document.createElement("img");
