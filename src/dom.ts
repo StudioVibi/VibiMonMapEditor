@@ -41,14 +41,14 @@ export function mount_app(root: HTMLElement): DomRefs {
           <section class="tool-section">
             <h2>Select/Move</h2>
             <button id="tool-move" class="tool-btn icon-only active" type="button" aria-label="Move tool" title="Move">
-              <img src="/assets/move.svg" alt="" />
+              <img src="assets/move.svg" alt="" />
             </button>
           </section>
           <section class="tool-section">
             <h2>Sprites</h2>
             <div class="tool-row">
               <button id="tool-paint" class="tool-btn icon-only" type="button" aria-label="Paint tool" title="Paint">
-                <img src="/assets/paint.svg" alt="" />
+                <img src="assets/paint.svg" alt="" />
               </button>
               <button id="tool-rubber" class="tool-btn icon-only rubber-btn" type="button" aria-label="Rubber tool" title="Rubber">
                 <span>×</span>

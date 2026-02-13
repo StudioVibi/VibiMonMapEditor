@@ -113,7 +113,7 @@ body {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  cursor: url("/assets/cursors/Pointer.svg") 4 4, pointer;
+  cursor: url("../assets/cursors/Pointer.svg") 4 4, pointer;
   position: relative;
   transition: color 150ms ease;
 }
@@ -226,7 +226,7 @@ body {
   border: 1px solid transparent;
   background: transparent;
   color: var(--ios-text-primary);
-  cursor: url("/assets/cursors/Pointer.svg") 4 4, pointer;
+  cursor: url("../assets/cursors/Pointer.svg") 4 4, pointer;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 
@@ -380,7 +380,7 @@ body {
   gap: 10px;
   text-align: left;
   padding: 8px 14px;
-  cursor: url("/assets/cursors/Pointer.svg") 4 4, pointer;
+  cursor: url("../assets/cursors/Pointer.svg") 4 4, pointer;
   color: var(--ios-text-primary);
   margin: 0;
   position: relative;
@@ -529,7 +529,7 @@ body {
   position: relative;
   height: calc(100% - 40px);
   overflow: hidden;
-  cursor: url("/assets/cursors/Arrow.svg") 2 2, default;
+  cursor: url("../assets/cursors/Arrow.svg") 2 2, default;
   background: var(--canvas);
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -537,33 +537,33 @@ body {
 }
 
 .visual-stage[data-tool="move"] {
-  cursor: url("/assets/cursors/Move.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), move;
+  cursor: url("../assets/cursors/Move.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), move;
 }
 
 .visual-stage[data-tool="paint"] {
-  cursor: url("/assets/cursors/Pointer.svg") 4 4, crosshair;
+  cursor: url("../assets/cursors/Pointer.svg") 4 4, crosshair;
 }
 
 .visual-stage[data-tool="rubber"] {
-  cursor: url("/assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
+  cursor: url("../assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
     not-allowed;
 }
 
 .visual-stage.is-panning {
-  cursor: url("/assets/cursors/Grab.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), grab;
+  cursor: url("../assets/cursors/Grab.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), grab;
 }
 
 .visual-stage.is-grabbing {
-  cursor: url("/assets/cursors/Grabbed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
+  cursor: url("../assets/cursors/Grabbed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
     grabbing;
 }
 
 .visual-stage.is-zoom-key {
-  cursor: url("/assets/cursors/ZoomIn.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), zoom-in;
+  cursor: url("../assets/cursors/ZoomIn.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), zoom-in;
 }
 
 .visual-stage.is-action-blocked {
-  cursor: url("/assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
+  cursor: url("../assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
     not-allowed;
 }
 
