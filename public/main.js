@@ -191,6 +191,49 @@ function token_map(tokens) {
   return map;
 }
 
+// src/keyboard-shortcuts.ts
+var SHORTCUTS = {
+  m: { type: "tool", tool: "move" },
+  p: { type: "tool", tool: "paint" },
+  d: { type: "tool", tool: "rubber" },
+  ArrowUp: { type: "navigate", direction: "up" },
+  ArrowDown: { type: "navigate", direction: "down" },
+  Enter: { type: "select-glyph" },
+  Escape: { type: "dismiss" }
+};
+function bind_shortcuts(handlers) {
+  const handle_keydown = (ev) => {
+    const in_input = ev.target instanceof HTMLInputElement;
+    const navigation_keys = ["ArrowUp", "ArrowDown", "Enter", "Escape"];
+    if (in_input && !navigation_keys.includes(ev.key)) {
+      return;
+    }
+    const action = SHORTCUTS[ev.key.toLowerCase()] || SHORTCUTS[ev.key];
+    if (!action)
+      return;
+    ev.preventDefault();
+    switch (action.type) {
+      case "tool":
+        handlers.set_tool(action.tool);
+        if (action.tool === "paint") {
+          handlers.focus_glyph_search();
+        }
+        break;
+      case "navigate":
+        handlers.navigate_glyphs(action.direction);
+        break;
+      case "select-glyph":
+        handlers.select_highlighted_glyph();
+        break;
+      case "dismiss":
+        handlers.dismiss();
+        break;
+    }
+  };
+  window.addEventListener("keydown", handle_keydown);
+  return () => window.removeEventListener("keydown", handle_keydown);
+}
+
 // src/raw-format.ts
 var EMPTY_FLOOR = "::";
 var EMPTY_ENTITY = "  ";
@@ -949,6 +992,8 @@ var token_by_key = new Map;
 var token_filter = "";
 var raw_timer = null;
 var is_space_down = false;
+var highlighted_glyph_index = -1;
+var filtered_tokens = [];
 var pointer_drag = null;
 function in_rect(x, y, rect) {
   return x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h;
@@ -1073,17 +1118,67 @@ function select_token(token) {
   refresh_interaction_ui();
   refresh_status();
 }
+function get_sprite_buttons() {
+  const buttons = [];
+  for (const child of refs.sprite_list.children) {
+    if (child instanceof HTMLButtonElement) {
+      buttons.push(child);
+    }
+  }
+  return buttons;
+}
+function update_highlighted_ui() {
+  const buttons = get_sprite_buttons();
+  for (let i = 0;i < buttons.length; i++) {
+    buttons[i].classList.toggle("highlighted", i === highlighted_glyph_index);
+  }
+  if (highlighted_glyph_index >= 0 && highlighted_glyph_index < buttons.length) {
+    buttons[highlighted_glyph_index].scrollIntoView({ block: "nearest" });
+  }
+}
+function navigate_glyphs(direction) {
+  const buttons = get_sprite_buttons();
+  if (buttons.length === 0)
+    return;
+  if (direction === "down") {
+    highlighted_glyph_index = Math.min(highlighted_glyph_index + 1, buttons.length - 1);
+  } else {
+    highlighted_glyph_index = Math.max(highlighted_glyph_index - 1, 0);
+  }
+  update_highlighted_ui();
+}
+function select_highlighted_glyph() {
+  const buttons = get_sprite_buttons();
+  if (highlighted_glyph_index >= 0 && highlighted_glyph_index < buttons.length) {
+    const token_key = buttons[highlighted_glyph_index].dataset.spriteId;
+    if (token_key) {
+      const token = token_by_key.get(token_key);
+      if (token) {
+        select_token(token);
+      }
+    }
+  }
+}
+function dismiss_search() {
+  refs.sprite_search.value = "";
+  token_filter = "";
+  refs.sprite_search.blur();
+  highlighted_glyph_index = -1;
+  render_token_list();
+  set_tool("move");
+}
 function render_token_list() {
   refs.sprite_list.innerHTML = "";
+  highlighted_glyph_index = -1;
   const q = token_filter.trim().toLowerCase();
-  const filtered = tokens.filter((entry) => {
+  filtered_tokens = tokens.filter((entry) => {
     if (!q) {
       return true;
     }
     return entry.token.toLowerCase().includes(q) || entry.name.toLowerCase().includes(q) || entry.label.toLowerCase().includes(q) || entry.kind.toLowerCase().includes(q);
   });
   let last_kind = null;
-  for (const entry of filtered) {
+  for (const entry of filtered_tokens) {
     if (entry.kind !== last_kind) {
       const group = document.createElement("div");
       group.className = "sprite-group-label";
@@ -1450,6 +1545,13 @@ function bind_events() {
     if (ev.key === "Control" || ev.key === "Meta") {
       refs.visual_stage.classList.remove("is-zoom-key");
     }
+  });
+  bind_shortcuts({
+    set_tool,
+    navigate_glyphs,
+    select_highlighted_glyph,
+    dismiss: dismiss_search,
+    focus_glyph_search: () => refs.sprite_search.focus()
   });
 }
 async function init_tokens() {

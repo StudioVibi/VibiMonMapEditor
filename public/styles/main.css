@@ -402,6 +402,17 @@ body {
   background: transparent;
 }
 
+.sprite-item.highlighted {
+  transform: scale(1.02);
+  transform-origin: left center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  z-index: 1;
+}
+
+.sprite-item.highlighted::before {
+  background-color: #ffcc00;
+}
+
 .sprite-thumb {
   width: var(--glyph-thumb-size);
   height: var(--glyph-thumb-size);

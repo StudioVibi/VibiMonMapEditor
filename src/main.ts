@@ -1,5 +1,6 @@
 import * as Dom from "./dom";
 import * as Cat from "./glyph-catalog";
+import * as Shortcuts from "./keyboard-shortcuts";
 import * as St from "./state";
 import * as Tools from "./tools";
 import type * as T from "./types";
@@ -24,6 +25,8 @@ let token_by_key = new Map<string, T.GlyphToken>();
 let token_filter = "";
 let raw_timer: number | null = null;
 let is_space_down = false;
+let highlighted_glyph_index = -1;
+let filtered_tokens: T.GlyphToken[] = [];
 
 let pointer_drag:
   | null
@@ -219,10 +222,65 @@ function select_token(token: T.GlyphToken): void {
   refresh_status();
 }
 
+function get_sprite_buttons(): HTMLButtonElement[] {
+  const buttons: HTMLButtonElement[] = [];
+  for (const child of refs.sprite_list.children) {
+    if (child instanceof HTMLButtonElement) {
+      buttons.push(child);
+    }
+  }
+  return buttons;
+}
+
+function update_highlighted_ui(): void {
+  const buttons = get_sprite_buttons();
+  for (let i = 0; i < buttons.length; i++) {
+    buttons[i].classList.toggle("highlighted", i === highlighted_glyph_index);
+  }
+  if (highlighted_glyph_index >= 0 && highlighted_glyph_index < buttons.length) {
+    buttons[highlighted_glyph_index].scrollIntoView({ block: "nearest" });
+  }
+}
+
+function navigate_glyphs(direction: "up" | "down"): void {
+  const buttons = get_sprite_buttons();
+  if (buttons.length === 0) return;
+
+  if (direction === "down") {
+    highlighted_glyph_index = Math.min(highlighted_glyph_index + 1, buttons.length - 1);
+  } else {
+    highlighted_glyph_index = Math.max(highlighted_glyph_index - 1, 0);
+  }
+  update_highlighted_ui();
+}
+
+function select_highlighted_glyph(): void {
+  const buttons = get_sprite_buttons();
+  if (highlighted_glyph_index >= 0 && highlighted_glyph_index < buttons.length) {
+    const token_key = buttons[highlighted_glyph_index].dataset.spriteId;
+    if (token_key) {
+      const token = token_by_key.get(token_key);
+      if (token) {
+        select_token(token);
+      }
+    }
+  }
+}
+
+function dismiss_search(): void {
+  refs.sprite_search.value = "";
+  token_filter = "";
+  refs.sprite_search.blur();
+  highlighted_glyph_index = -1;
+  render_token_list();
+  set_tool("move");
+}
+
 function render_token_list(): void {
   refs.sprite_list.innerHTML = "";
+  highlighted_glyph_index = -1;
   const q = token_filter.trim().toLowerCase();
-  const filtered = tokens.filter((entry) => {
+  filtered_tokens = tokens.filter((entry) => {
     if (!q) {
       return true;
     }
@@ -236,7 +294,7 @@ function render_token_list(): void {
 
   let last_kind: T.GlyphKind | null = null;
 
-  for (const entry of filtered) {
+  for (const entry of filtered_tokens) {
     if (entry.kind !== last_kind) {
       const group = document.createElement("div");
       group.className = "sprite-group-label";
@@ -691,6 +749,14 @@ function bind_events(): void {
     if (ev.key === "Control" || ev.key === "Meta") {
       refs.visual_stage.classList.remove("is-zoom-key");
     }
+  });
+
+  Shortcuts.bind_shortcuts({
+    set_tool,
+    navigate_glyphs,
+    select_highlighted_glyph,
+    dismiss: dismiss_search,
+    focus_glyph_search: () => refs.sprite_search.focus(),
   });
 }
 
