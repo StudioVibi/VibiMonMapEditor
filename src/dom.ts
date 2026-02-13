@@ -29,7 +29,7 @@ export function mount_app(root: HTMLElement): DomRefs {
           <div class="project-title">Vibi Level Editor</div>
         </div>
         <div class="topbar-col topbar-col-main">
-          <div class="map-name">MapNamePlaceholder</div>
+          <div class="map-name"></div>
         </div>
         <div class="mode-toggle" role="tablist" aria-label="Render mode">
           <button id="mode-raw" class="mode-btn" type="button">RAW</button>
