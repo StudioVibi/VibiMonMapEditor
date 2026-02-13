@@ -9,7 +9,7 @@ const raw_debounce_ms = 180;
 
 const root = document.querySelector("#app");
 if (!root) {
-  throw new Error("App root não encontrado.");
+  throw new Error("App root not found.");
 }
 
 const refs = Dom.mount_app(root);
@@ -169,10 +169,11 @@ function set_tool(tool: T.Tool): void {
 function select_token(token: T.GlyphToken): void {
   state.selected_token = token;
   state.selected_token_key = token.token;
-  refs.sprite_meta.textContent = `${token.token} ${token.name} (${token.kind}, ${token.width}x${token.height})`;
   for (const child of refs.sprite_list.children) {
-    const el = child as HTMLButtonElement;
-    el.classList.toggle("active", el.dataset.spriteId === token.token);
+    if (!(child instanceof HTMLButtonElement)) {
+      continue;
+    }
+    child.classList.toggle("active", child.dataset.spriteId === token.token);
   }
   refresh_status();
 }
@@ -192,7 +193,17 @@ function render_token_list(): void {
     );
   });
 
+  let last_kind: T.GlyphKind | null = null;
+
   for (const entry of filtered) {
+    if (entry.kind !== last_kind) {
+      const group = document.createElement("div");
+      group.className = "sprite-group-label";
+      group.textContent = entry.kind;
+      refs.sprite_list.appendChild(group);
+      last_kind = entry.kind;
+    }
+
     const row = document.createElement("button");
     row.type = "button";
     row.className = "sprite-item";
@@ -213,10 +224,20 @@ function render_token_list(): void {
     glyph.textContent = entry.token;
     row.appendChild(glyph);
 
+    const details = document.createElement("span");
+    details.className = "sprite-details";
+
     const label = document.createElement("span");
     label.className = "sprite-label";
-    label.textContent = `${entry.name} [${entry.kind}]`;
-    row.appendChild(label);
+    label.textContent = entry.label;
+    details.appendChild(label);
+
+    const meta = document.createElement("span");
+    meta.className = "sprite-row-meta";
+    meta.textContent = `${entry.name} [${entry.kind}]`;
+    details.appendChild(meta);
+
+    row.appendChild(details);
 
     row.addEventListener("click", () => {
       select_token(entry);
@@ -227,8 +248,10 @@ function render_token_list(): void {
 
   if (state.selected_token_key) {
     for (const child of refs.sprite_list.children) {
-      const el = child as HTMLButtonElement;
-      el.classList.toggle("active", el.dataset.spriteId === state.selected_token_key);
+      if (!(child instanceof HTMLButtonElement)) {
+        continue;
+      }
+      child.classList.toggle("active", child.dataset.spriteId === state.selected_token_key);
     }
   }
 }
@@ -570,7 +593,7 @@ async function init_tokens(): Promise<void> {
   } catch (err) {
     tokens = [];
     token_by_key = new Map<string, T.GlyphToken>();
-    refs.sprite_meta.textContent = `Falha ao carregar glifos: ${String(err)}`;
+    Dom.set_status(refs, `Failed to load glyph catalog: ${String(err)}`);
   }
 
   render_token_list();

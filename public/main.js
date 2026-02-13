@@ -3,29 +3,40 @@ function mount_app(root) {
   root.innerHTML = `
     <div class="editor-shell">
       <header class="topbar">
-        <div class="project-title">VibiMon Map Editor</div>
+        <div class="topbar-col">
+          <div class="project-title">Vibi Level Editor</div>
+        </div>
+        <div class="topbar-col topbar-col-main">
+          <div class="map-name">MapNamePlaceholder</div>
+        </div>
         <div class="mode-toggle" role="tablist" aria-label="Render mode">
           <button id="mode-raw" class="mode-btn" type="button">RAW</button>
-          <span class="mode-sep">|</span>
           <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
         </div>
       </header>
       <main class="main-layout">
         <aside class="sidebar">
           <section class="tool-section">
-            <h2>Move Tool</h2>
-            <button id="tool-move" class="tool-btn active" type="button">Move</button>
-            <p class="tool-help">Arraste tile para mover. Arraste em área vazia para selecionar bloco.</p>
+            <h2>Select/Move</h2>
+            <button id="tool-move" class="tool-btn icon-only active" type="button" aria-label="Move tool" title="Move">
+              <img src="/assets/move.svg" alt="" />
+            </button>
           </section>
           <section class="tool-section">
-            <h2>Sprites Tool</h2>
-            <button id="tool-paint" class="tool-btn" type="button">Paint</button>
-            <button id="tool-rubber" class="tool-btn" type="button">Rubber</button>
+            <h2>Sprites</h2>
+            <div class="tool-row">
+              <button id="tool-paint" class="tool-btn icon-only" type="button" aria-label="Paint tool" title="Paint">
+                <img src="/assets/paint.svg" alt="" />
+              </button>
+              <button id="tool-rubber" class="tool-btn icon-only rubber-btn" type="button" aria-label="Rubber tool" title="Rubber">
+                <span>×</span>
+              </button>
+            </div>
           </section>
           <section id="paint-panel" class="paint-panel hidden">
             <h3>Glyph Tilesets</h3>
-            <input id="sprite-search" type="text" placeholder="Buscar glifo/token..." />
-            <div id="sprite-meta" class="sprite-meta">Nenhum glifo selecionado.</div>
+            <input id="sprite-search" type="text" placeholder="Search glyph/token..." />
+            <div id="sprite-meta" class="sprite-meta" aria-hidden="true"></div>
             <div id="sprite-list" class="sprite-list"></div>
           </section>
         </aside>
@@ -167,7 +178,7 @@ function parse_glyph_entries(source) {
 async function load_glyph_catalog() {
   const res = await fetch("VibiMon/src/data/Glyph.ts");
   if (!res.ok) {
-    throw new Error("Não foi possível carregar Glyph.ts.");
+    throw new Error("Could not load Glyph.ts.");
   }
   const source = await res.text();
   return parse_glyph_entries(source);
@@ -242,10 +253,10 @@ function parse_raw(text) {
   const lines = text.split(`
 `);
   if (lines.length === 0) {
-    return { ok: false, error: "RAW vazio." };
+    return { ok: false, error: "RAW is empty." };
   }
   if (lines.length % 2 !== 0) {
-    return { ok: false, error: "RAW precisa ter número par de linhas." };
+    return { ok: false, error: "RAW must have an even number of lines." };
   }
   const entity_rows = [];
   const floor_rows = [];
@@ -256,7 +267,7 @@ function parse_raw(text) {
       const line_no = i + 1;
       return {
         ok: false,
-        error: `Linha ${line_no}: entity e floor com larguras diferentes.`
+        error: `Line ${line_no}: entity and floor have different widths.`
       };
     }
     entity_rows.push(entity_row);
@@ -264,11 +275,11 @@ function parse_raw(text) {
   }
   const width = floor_rows[0]?.length ?? 0;
   if (width === 0) {
-    return { ok: false, error: "RAW sem colunas válidas." };
+    return { ok: false, error: "RAW has no valid columns." };
   }
   for (let y = 0;y < floor_rows.length; y++) {
     if (floor_rows[y].length !== width || entity_rows[y].length !== width) {
-      return { ok: false, error: `Linha de tile ${y + 1} com largura inconsistente.` };
+      return { ok: false, error: `Tile row ${y + 1} has inconsistent width.` };
     }
   }
   const cells = [];
@@ -779,7 +790,7 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
 var raw_debounce_ms = 180;
 var root = document.querySelector("#app");
 if (!root) {
-  throw new Error("App root não encontrado.");
+  throw new Error("App root not found.");
 }
 var refs = mount_app(root);
 var visual = create_visual_renderer(refs.visual_stage, refs.visual_grid, refs.visual_overlay);
@@ -875,10 +886,11 @@ function set_tool(tool) {
 function select_token(token) {
   state.selected_token = token;
   state.selected_token_key = token.token;
-  refs.sprite_meta.textContent = `${token.token} ${token.name} (${token.kind}, ${token.width}x${token.height})`;
   for (const child of refs.sprite_list.children) {
-    const el = child;
-    el.classList.toggle("active", el.dataset.spriteId === token.token);
+    if (!(child instanceof HTMLButtonElement)) {
+      continue;
+    }
+    child.classList.toggle("active", child.dataset.spriteId === token.token);
   }
   refresh_status();
 }
@@ -891,7 +903,15 @@ function render_token_list() {
     }
     return entry.token.toLowerCase().includes(q) || entry.name.toLowerCase().includes(q) || entry.label.toLowerCase().includes(q) || entry.kind.toLowerCase().includes(q);
   });
+  let last_kind = null;
   for (const entry of filtered) {
+    if (entry.kind !== last_kind) {
+      const group = document.createElement("div");
+      group.className = "sprite-group-label";
+      group.textContent = entry.kind;
+      refs.sprite_list.appendChild(group);
+      last_kind = entry.kind;
+    }
     const row = document.createElement("button");
     row.type = "button";
     row.className = "sprite-item";
@@ -909,10 +929,17 @@ function render_token_list() {
     glyph.className = "sprite-glyph";
     glyph.textContent = entry.token;
     row.appendChild(glyph);
+    const details = document.createElement("span");
+    details.className = "sprite-details";
     const label = document.createElement("span");
     label.className = "sprite-label";
-    label.textContent = `${entry.name} [${entry.kind}]`;
-    row.appendChild(label);
+    label.textContent = entry.label;
+    details.appendChild(label);
+    const meta = document.createElement("span");
+    meta.className = "sprite-row-meta";
+    meta.textContent = `${entry.name} [${entry.kind}]`;
+    details.appendChild(meta);
+    row.appendChild(details);
     row.addEventListener("click", () => {
       select_token(entry);
     });
@@ -920,8 +947,10 @@ function render_token_list() {
   }
   if (state.selected_token_key) {
     for (const child of refs.sprite_list.children) {
-      const el = child;
-      el.classList.toggle("active", el.dataset.spriteId === state.selected_token_key);
+      if (!(child instanceof HTMLButtonElement)) {
+        continue;
+      }
+      child.classList.toggle("active", child.dataset.spriteId === state.selected_token_key);
     }
   }
 }
@@ -1195,7 +1224,7 @@ async function init_tokens() {
   } catch (err) {
     tokens = [];
     token_by_key = new Map;
-    refs.sprite_meta.textContent = `Falha ao carregar glifos: ${String(err)}`;
+    set_status(refs, `Failed to load glyph catalog: ${String(err)}`);
   }
   render_token_list();
   const preferred = tokens.find((entry) => entry.token === "TT");

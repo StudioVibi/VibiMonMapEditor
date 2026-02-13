@@ -91,7 +91,7 @@ function parse_glyph_entries(source: string): T.GlyphToken[] {
 export async function load_glyph_catalog(): Promise<T.GlyphToken[]> {
   const res = await fetch("VibiMon/src/data/Glyph.ts");
   if (!res.ok) {
-    throw new Error("Não foi possível carregar Glyph.ts.");
+    throw new Error("Could not load Glyph.ts.");
   }
   const source = await res.text();
   return parse_glyph_entries(source);

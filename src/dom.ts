@@ -25,29 +25,40 @@ export function mount_app(root: HTMLElement): DomRefs {
   root.innerHTML = `
     <div class="editor-shell">
       <header class="topbar">
-        <div class="project-title">VibiMon Map Editor</div>
+        <div class="topbar-col">
+          <div class="project-title">Vibi Level Editor</div>
+        </div>
+        <div class="topbar-col topbar-col-main">
+          <div class="map-name">MapNamePlaceholder</div>
+        </div>
         <div class="mode-toggle" role="tablist" aria-label="Render mode">
           <button id="mode-raw" class="mode-btn" type="button">RAW</button>
-          <span class="mode-sep">|</span>
           <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
         </div>
       </header>
       <main class="main-layout">
         <aside class="sidebar">
           <section class="tool-section">
-            <h2>Move Tool</h2>
-            <button id="tool-move" class="tool-btn active" type="button">Move</button>
-            <p class="tool-help">Arraste tile para mover. Arraste em área vazia para selecionar bloco.</p>
+            <h2>Select/Move</h2>
+            <button id="tool-move" class="tool-btn icon-only active" type="button" aria-label="Move tool" title="Move">
+              <img src="/assets/move.svg" alt="" />
+            </button>
           </section>
           <section class="tool-section">
-            <h2>Sprites Tool</h2>
-            <button id="tool-paint" class="tool-btn" type="button">Paint</button>
-            <button id="tool-rubber" class="tool-btn" type="button">Rubber</button>
+            <h2>Sprites</h2>
+            <div class="tool-row">
+              <button id="tool-paint" class="tool-btn icon-only" type="button" aria-label="Paint tool" title="Paint">
+                <img src="/assets/paint.svg" alt="" />
+              </button>
+              <button id="tool-rubber" class="tool-btn icon-only rubber-btn" type="button" aria-label="Rubber tool" title="Rubber">
+                <span>×</span>
+              </button>
+            </div>
           </section>
           <section id="paint-panel" class="paint-panel hidden">
             <h3>Glyph Tilesets</h3>
-            <input id="sprite-search" type="text" placeholder="Buscar glifo/token..." />
-            <div id="sprite-meta" class="sprite-meta">Nenhum glifo selecionado.</div>
+            <input id="sprite-search" type="text" placeholder="Search glyph/token..." />
+            <div id="sprite-meta" class="sprite-meta" aria-hidden="true"></div>
             <div id="sprite-list" class="sprite-list"></div>
           </section>
         </aside>

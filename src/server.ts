@@ -16,6 +16,9 @@ function guess_type(pathname: string): string {
   if (pathname.endsWith(".png")) {
     return "image/png";
   }
+  if (pathname.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
   if (pathname.endsWith(".ico")) {
     return "image/x-icon";
   }

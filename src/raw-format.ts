@@ -68,11 +68,11 @@ export function parse_raw(text: string):
   const lines = text.split("\n");
 
   if (lines.length === 0) {
-    return { ok: false, error: "RAW vazio." };
+    return { ok: false, error: "RAW is empty." };
   }
 
   if (lines.length % 2 !== 0) {
-    return { ok: false, error: "RAW precisa ter número par de linhas." };
+    return { ok: false, error: "RAW must have an even number of lines." };
   }
 
   const entity_rows: string[][] = [];
@@ -85,7 +85,7 @@ export function parse_raw(text: string):
       const line_no = i + 1;
       return {
         ok: false,
-        error: `Linha ${line_no}: entity e floor com larguras diferentes.`
+        error: `Line ${line_no}: entity and floor have different widths.`
       };
     }
     entity_rows.push(entity_row);
@@ -94,12 +94,12 @@ export function parse_raw(text: string):
 
   const width = floor_rows[0]?.length ?? 0;
   if (width === 0) {
-    return { ok: false, error: "RAW sem colunas válidas." };
+    return { ok: false, error: "RAW has no valid columns." };
   }
 
   for (let y = 0; y < floor_rows.length; y++) {
     if (floor_rows[y].length !== width || entity_rows[y].length !== width) {
-      return { ok: false, error: `Linha de tile ${y + 1} com largura inconsistente.` };
+      return { ok: false, error: `Tile row ${y + 1} has inconsistent width.` };
     }
   }
 
