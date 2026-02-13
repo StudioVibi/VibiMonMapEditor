@@ -2,6 +2,9 @@ import * as Raw from "./raw-format";
 import * as St from "./state";
 import type * as T from "./types";
 
+export const VIBIMON_ASSET_ROOT = "vibimon-assets";
+export const DEFAULT_FLOOR_ASSET = `${VIBIMON_ASSET_ROOT}/tile_grass_00_00.png`;
+
 function sprite_id(name: string, ix: number, iy: number): string {
   const pad_x = String(ix).padStart(2, "0");
   const pad_y = String(iy).padStart(2, "0");
@@ -10,9 +13,9 @@ function sprite_id(name: string, ix: number, iy: number): string {
 
 function building_asset(name: string, ix: number, iy: number): string {
   if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `VibiMon/assets/${name}.png`;
+    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
   }
-  return `VibiMon/assets/${sprite_id(name, ix, iy)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id(name, ix, iy)}.png`;
 }
 
 function border_id(
@@ -100,12 +103,12 @@ function floor_asset(
 ): string {
   const cell = St.grid_get(grid, x, y);
   if (!cell) {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
 
   const tok = cell.floor;
   if (tok === Raw.EMPTY_FLOOR) {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
 
   const def = token_map.get(tok);
@@ -123,7 +126,7 @@ function floor_asset(
     const dw_lf = same_floor(grid, x - 1, y + 1, tok);
     const dw_rg = same_floor(grid, x + 1, y + 1, tok);
     const id = border_id(def.name, up, dw, lf, rg, up_lf, up_rg, dw_lf, dw_rg);
-    return `VibiMon/assets/${id}.png`;
+    return `${VIBIMON_ASSET_ROOT}/${id}.png`;
   }
 
   if (def.kind === "building") {
@@ -137,7 +140,7 @@ function floor_asset(
   }
 
   if (def.kind === "marker") {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
 
   return "";
@@ -161,7 +164,7 @@ function entity_asset(
   if (!def || def.kind !== "entity" || !def.sprite) {
     return "";
   }
-  return `VibiMon/assets/${def.sprite}_front_stand.png`;
+  return `${VIBIMON_ASSET_ROOT}/${def.sprite}_front_stand.png`;
 }
 
 export interface ResolvedCellVisual {
@@ -180,7 +183,7 @@ export function resolve_cell_visual(
   const cell = St.grid_get(grid, x, y);
   if (!cell) {
     return {
-      floor_asset: "VibiMon/assets/tile_grass_00_00.png",
+      floor_asset: DEFAULT_FLOOR_ASSET,
       entity_asset: "",
       floor_glyph: Raw.EMPTY_FLOOR,
       entity_glyph: Raw.EMPTY_ENTITY

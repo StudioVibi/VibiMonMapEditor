@@ -29,16 +29,32 @@ function cell_key(x: number, y: number): string {
   return `${x},${y}`;
 }
 
-function apply_image(img: HTMLImageElement, src: string): void {
+function apply_image(
+  img: HTMLImageElement,
+  src: string,
+  missing_behavior: "hide" | "fallback-floor"
+): void {
   if (!src) {
     img.style.display = "none";
     img.removeAttribute("src");
     return;
   }
+
+  img.onerror = () => {
+    if (missing_behavior === "fallback-floor" && img.dataset.fallbackApplied !== "1") {
+      img.dataset.fallbackApplied = "1";
+      img.src = Vr.DEFAULT_FLOOR_ASSET;
+      return;
+    }
+    img.style.display = "none";
+    img.removeAttribute("src");
+  };
+
   img.style.display = "block";
-  if (img.src.endsWith(src)) {
+  if (img.getAttribute("src") === src) {
     return;
   }
+  img.dataset.fallbackApplied = "0";
   img.src = src;
 }
 
@@ -56,8 +72,8 @@ function apply_cell_visual(
   const floor_text = el.querySelector(".tile-floor-glyph") as HTMLSpanElement;
   const ent_text = el.querySelector(".tile-entity-glyph") as HTMLSpanElement;
 
-  apply_image(floor_img, data.floor_asset);
-  apply_image(ent_img, data.entity_asset);
+  apply_image(floor_img, data.floor_asset, "fallback-floor");
+  apply_image(ent_img, data.entity_asset, "hide");
 
   floor_text.textContent = data.floor_glyph;
   ent_text.textContent = data.entity_glyph.trim();
@@ -106,9 +122,9 @@ function sprite_id(name: string, ix: number, iy: number): string {
 
 function building_asset(name: string, ix: number, iy: number): string {
   if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `VibiMon/assets/${name}.png`;
+    return `${Vr.VIBIMON_ASSET_ROOT}/${name}.png`;
   }
-  return `VibiMon/assets/${sprite_id(name, ix, iy)}.png`;
+  return `${Vr.VIBIMON_ASSET_ROOT}/${sprite_id(name, ix, iy)}.png`;
 }
 
 export function create_visual_renderer(
@@ -328,22 +344,25 @@ export function create_visual_renderer(
           const entity = document.createElement("img");
           entity.className = "move-preview-entity";
           entity.alt = "";
-          entity.src = `VibiMon/assets/${token.sprite}_front_stand.png`;
+          apply_image(entity, `${Vr.VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`, "hide");
           tile.appendChild(entity);
         } else if (token.kind === "building") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
-          floor.src =
+          apply_image(
+            floor,
             token.width > 1 || token.height > 1
               ? building_asset(token.name, ix, iy)
-              : building_asset(token.name, 0, 0);
+              : building_asset(token.name, 0, 0),
+            "fallback-floor"
+          );
           tile.appendChild(floor);
         } else if (token.kind === "bordered") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
-          floor.src = `VibiMon/assets/${token.name}_center.png`;
+          apply_image(floor, `${Vr.VIBIMON_ASSET_ROOT}/${token.name}_center.png`, "fallback-floor");
           tile.appendChild(floor);
         }
 

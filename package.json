@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "bun run build:public",
-    "build:public": "bun build src/main.ts --outfile public/main.js --target browser && cp index.html public/index.html && mkdir -p public/styles && cp styles/main.css public/styles/main.css && cp styles/ios-theme.css public/styles/ios-theme.css",
-    "build:pages": "rm -rf docs && mkdir -p docs/styles && bun build src/main.ts --outfile docs/main.js --target browser && cp index.html docs/index.html && cp styles/main.css docs/styles/main.css && cp styles/ios-theme.css docs/styles/ios-theme.css && cp -R public/assets docs/assets && if [ -d VibiMon/assets ]; then mkdir -p docs/VibiMon && cp -R VibiMon/assets docs/VibiMon/assets; fi && touch docs/.nojekyll",
+    "sync:sprites": "bun run scripts/sync-vibimon-assets.ts",
+    "build:public": "bun run sync:sprites && bun build src/main.ts --outfile public/main.js --target browser && cp index.html public/index.html && mkdir -p public/styles && cp styles/main.css public/styles/main.css && cp styles/ios-theme.css public/styles/ios-theme.css",
+    "build:pages": "bun run sync:sprites && rm -rf docs && mkdir -p docs/styles && bun build src/main.ts --outfile docs/main.js --target browser && cp index.html docs/index.html && cp styles/main.css docs/styles/main.css && cp styles/ios-theme.css docs/styles/ios-theme.css && cp -R public/assets docs/assets && cp -R public/vibimon-assets docs/vibimon-assets && touch docs/.nojekyll",
     "server": "bun run build:public && bun run src/server.ts"
   }
 }

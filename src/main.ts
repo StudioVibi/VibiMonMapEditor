@@ -4,6 +4,7 @@ import * as Shortcuts from "./keyboard-shortcuts";
 import * as St from "./state";
 import * as Tools from "./tools";
 import type * as T from "./types";
+import { DEFAULT_FLOOR_ASSET, VIBIMON_ASSET_ROOT } from "./vibimon-resolver";
 import * as Visual from "./visual-render";
 
 const raw_debounce_ms = 180;
@@ -100,29 +101,29 @@ function sprite_id(name: string, ix: number, iy: number): string {
 
 function building_preview_asset(name: string): string {
   if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `VibiMon/assets/${name}.png`;
+    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
   }
-  return `VibiMon/assets/${sprite_id(name, 0, 0)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id(name, 0, 0)}.png`;
 }
 
 function preview_asset(token: T.GlyphToken): string {
   if (token.token === "::") {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
 
   if (token.kind === "entity" && token.sprite) {
-    return `VibiMon/assets/${token.sprite}_front_stand.png`;
+    return `${VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`;
   }
 
   if (token.kind === "bordered") {
-    return `VibiMon/assets/${token.name}_center.png`;
+    return `${VIBIMON_ASSET_ROOT}/${token.name}_center.png`;
   }
 
   if (token.kind === "building") {
     return building_preview_asset(token.name);
   }
 
-  return "VibiMon/assets/tile_grass_00_00.png";
+  return DEFAULT_FLOOR_ASSET;
 }
 
 function refresh_status(): void {
@@ -309,13 +310,19 @@ function render_token_list(): void {
     row.dataset.spriteId = entry.token;
 
     const img = document.createElement("img");
-    img.src = preview_asset(entry);
     img.alt = entry.name;
     img.className = "sprite-thumb";
     img.loading = "lazy";
     img.onerror = () => {
-      img.style.display = "none";
+      if (img.dataset.fallbackApplied === "1") {
+        img.style.display = "none";
+        return;
+      }
+      img.dataset.fallbackApplied = "1";
+      img.src = DEFAULT_FLOOR_ASSET;
     };
+    img.dataset.fallbackApplied = "0";
+    img.src = preview_asset(entry);
     row.appendChild(img);
 
     const glyph = document.createElement("span");

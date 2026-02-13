@@ -89,12 +89,20 @@ function parse_glyph_entries(source: string): T.GlyphToken[] {
 }
 
 export async function load_glyph_catalog(): Promise<T.GlyphToken[]> {
-  const res = await fetch("VibiMon/src/data/Glyph.ts");
-  if (!res.ok) {
-    throw new Error("Could not load Glyph.ts.");
+  const candidates = ["vibimon-assets/Glyph.ts", "VibiMon/src/data/Glyph.ts"];
+  let last_error = "Could not load Glyph.ts.";
+
+  for (const path of candidates) {
+    const res = await fetch(path);
+    if (!res.ok) {
+      last_error = `Could not load ${path}.`;
+      continue;
+    }
+    const source = await res.text();
+    return parse_glyph_entries(source);
   }
-  const source = await res.text();
-  return parse_glyph_entries(source);
+
+  throw new Error(last_error);
 }
 
 export function token_map(tokens: T.GlyphToken[]): Map<string, T.GlyphToken> {

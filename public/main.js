@@ -176,12 +176,18 @@ function parse_glyph_entries(source) {
   return out;
 }
 async function load_glyph_catalog() {
-  const res = await fetch("VibiMon/src/data/Glyph.ts");
-  if (!res.ok) {
-    throw new Error("Could not load Glyph.ts.");
+  const candidates = ["vibimon-assets/Glyph.ts", "VibiMon/src/data/Glyph.ts"];
+  let last_error = "Could not load Glyph.ts.";
+  for (const path of candidates) {
+    const res = await fetch(path);
+    if (!res.ok) {
+      last_error = `Could not load ${path}.`;
+      continue;
+    }
+    const source = await res.text();
+    return parse_glyph_entries(source);
   }
-  const source = await res.text();
-  return parse_glyph_entries(source);
+  throw new Error(last_error);
 }
 function token_map(tokens) {
   const map = new Map;
@@ -538,6 +544,8 @@ function move_rect(grid, rect, delta_x, delta_y) {
 }
 
 // src/vibimon-resolver.ts
+var VIBIMON_ASSET_ROOT = "vibimon-assets";
+var DEFAULT_FLOOR_ASSET = `${VIBIMON_ASSET_ROOT}/tile_grass_00_00.png`;
 function sprite_id(name, ix, iy) {
   const pad_x = String(ix).padStart(2, "0");
   const pad_y = String(iy).padStart(2, "0");
@@ -545,9 +553,9 @@ function sprite_id(name, ix, iy) {
 }
 function building_asset(name, ix, iy) {
   if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `VibiMon/assets/${name}.png`;
+    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
   }
-  return `VibiMon/assets/${sprite_id(name, ix, iy)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id(name, ix, iy)}.png`;
 }
 function border_id(name, up, dw, lf, rg, up_lf, up_rg, dw_lf, dw_rg) {
   const base = `${name}_`;
@@ -613,11 +621,11 @@ function top_left_of_block(grid, x, y, token) {
 function floor_asset(grid, x, y, token_map2) {
   const cell = grid_get(grid, x, y);
   if (!cell) {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
   const tok = cell.floor;
   if (tok === EMPTY_FLOOR) {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
   const def = token_map2.get(tok);
   if (!def) {
@@ -633,7 +641,7 @@ function floor_asset(grid, x, y, token_map2) {
     const dw_lf = same_floor(grid, x - 1, y + 1, tok);
     const dw_rg = same_floor(grid, x + 1, y + 1, tok);
     const id = border_id(def.name, up, dw, lf, rg, up_lf, up_rg, dw_lf, dw_rg);
-    return `VibiMon/assets/${id}.png`;
+    return `${VIBIMON_ASSET_ROOT}/${id}.png`;
   }
   if (def.kind === "building") {
     if (def.width > 1 || def.height > 1) {
@@ -645,7 +653,7 @@ function floor_asset(grid, x, y, token_map2) {
     return building_asset(def.name, 0, 0);
   }
   if (def.kind === "marker") {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
   return "";
 }
@@ -662,13 +670,13 @@ function entity_asset(grid, x, y, token_map2) {
   if (!def || def.kind !== "entity" || !def.sprite) {
     return "";
   }
-  return `VibiMon/assets/${def.sprite}_front_stand.png`;
+  return `${VIBIMON_ASSET_ROOT}/${def.sprite}_front_stand.png`;
 }
 function resolve_cell_visual(grid, x, y, token_map2) {
   const cell = grid_get(grid, x, y);
   if (!cell) {
     return {
-      floor_asset: "VibiMon/assets/tile_grass_00_00.png",
+      floor_asset: DEFAULT_FLOOR_ASSET,
       entity_asset: "",
       floor_glyph: EMPTY_FLOOR,
       entity_glyph: EMPTY_ENTITY
@@ -689,16 +697,26 @@ var MAX_ZOOM = 4;
 function cell_key(x, y) {
   return `${x},${y}`;
 }
-function apply_image(img, src) {
+function apply_image(img, src, missing_behavior) {
   if (!src) {
     img.style.display = "none";
     img.removeAttribute("src");
     return;
   }
+  img.onerror = () => {
+    if (missing_behavior === "fallback-floor" && img.dataset.fallbackApplied !== "1") {
+      img.dataset.fallbackApplied = "1";
+      img.src = DEFAULT_FLOOR_ASSET;
+      return;
+    }
+    img.style.display = "none";
+    img.removeAttribute("src");
+  };
   img.style.display = "block";
-  if (img.src.endsWith(src)) {
+  if (img.getAttribute("src") === src) {
     return;
   }
+  img.dataset.fallbackApplied = "0";
   img.src = src;
 }
 function apply_cell_visual(el, x, y, grid, token_map2) {
@@ -707,8 +725,8 @@ function apply_cell_visual(el, x, y, grid, token_map2) {
   const ent_img = el.querySelector(".tile-entity-img");
   const floor_text = el.querySelector(".tile-floor-glyph");
   const ent_text = el.querySelector(".tile-entity-glyph");
-  apply_image(floor_img, data.floor_asset);
-  apply_image(ent_img, data.entity_asset);
+  apply_image(floor_img, data.floor_asset, "fallback-floor");
+  apply_image(ent_img, data.entity_asset, "hide");
   floor_text.textContent = data.floor_glyph;
   ent_text.textContent = data.entity_glyph.trim();
   ent_text.style.display = data.entity_glyph.trim() ? "inline-block" : "none";
@@ -747,9 +765,9 @@ function sprite_id2(name, ix, iy) {
 }
 function building_asset2(name, ix, iy) {
   if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `VibiMon/assets/${name}.png`;
+    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
   }
-  return `VibiMon/assets/${sprite_id2(name, ix, iy)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id2(name, ix, iy)}.png`;
 }
 function create_visual_renderer(stage_el, grid_el, overlay_el) {
   const tile_dom = new Map;
@@ -931,19 +949,19 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
           const entity = document.createElement("img");
           entity.className = "move-preview-entity";
           entity.alt = "";
-          entity.src = `VibiMon/assets/${token.sprite}_front_stand.png`;
+          apply_image(entity, `${VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`, "hide");
           tile.appendChild(entity);
         } else if (token.kind === "building") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
-          floor.src = token.width > 1 || token.height > 1 ? building_asset2(token.name, ix, iy) : building_asset2(token.name, 0, 0);
+          apply_image(floor, token.width > 1 || token.height > 1 ? building_asset2(token.name, ix, iy) : building_asset2(token.name, 0, 0), "fallback-floor");
           tile.appendChild(floor);
         } else if (token.kind === "bordered") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
-          floor.src = `VibiMon/assets/${token.name}_center.png`;
+          apply_image(floor, `${VIBIMON_ASSET_ROOT}/${token.name}_center.png`, "fallback-floor");
           tile.appendChild(floor);
         }
         preview.appendChild(tile);
@@ -1018,24 +1036,24 @@ function sprite_id3(name, ix, iy) {
 }
 function building_preview_asset(name) {
   if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `VibiMon/assets/${name}.png`;
+    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
   }
-  return `VibiMon/assets/${sprite_id3(name, 0, 0)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id3(name, 0, 0)}.png`;
 }
 function preview_asset(token) {
   if (token.token === "::") {
-    return "VibiMon/assets/tile_grass_00_00.png";
+    return DEFAULT_FLOOR_ASSET;
   }
   if (token.kind === "entity" && token.sprite) {
-    return `VibiMon/assets/${token.sprite}_front_stand.png`;
+    return `${VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`;
   }
   if (token.kind === "bordered") {
-    return `VibiMon/assets/${token.name}_center.png`;
+    return `${VIBIMON_ASSET_ROOT}/${token.name}_center.png`;
   }
   if (token.kind === "building") {
     return building_preview_asset(token.name);
   }
-  return "VibiMon/assets/tile_grass_00_00.png";
+  return DEFAULT_FLOOR_ASSET;
 }
 function refresh_status() {
   const picked = state.selected_token ? `${state.selected_token.token} ${state.selected_token.name}` : "none";
@@ -1195,13 +1213,19 @@ function render_token_list() {
     row.className = "sprite-item";
     row.dataset.spriteId = entry.token;
     const img = document.createElement("img");
-    img.src = preview_asset(entry);
     img.alt = entry.name;
     img.className = "sprite-thumb";
     img.loading = "lazy";
     img.onerror = () => {
-      img.style.display = "none";
+      if (img.dataset.fallbackApplied === "1") {
+        img.style.display = "none";
+        return;
+      }
+      img.dataset.fallbackApplied = "1";
+      img.src = DEFAULT_FLOOR_ASSET;
     };
+    img.dataset.fallbackApplied = "0";
+    img.src = preview_asset(entry);
     row.appendChild(img);
     const glyph = document.createElement("span");
     glyph.className = "sprite-glyph";
