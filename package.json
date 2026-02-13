@@ -1,0 +1,9 @@
+{
+  "name": "vibimon-map-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/main.ts --outfile public/main.js --target browser && cp index.html public/index.html && mkdir -p public/styles && cp styles/main.css public/styles/main.css",
+    "server": "bun run build && bun run src/server.ts"
+  }
+}
