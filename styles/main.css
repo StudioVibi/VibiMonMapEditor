@@ -24,10 +24,10 @@
   --glyph-thumb-size: 36px;
   --cursor-hotspot-x: 12;
   --cursor-hotspot-y: 12;
-  --move-preview-fill: rgba(255, 66, 66, 0.42);
-  --move-preview-fill-invalid: rgba(255, 40, 40, 0.56);
-  --move-preview-border: rgba(220, 30, 30, 0.98);
-  --move-preview-border-invalid: rgba(140, 8, 8, 1);
+  --move-preview-fill: rgba(0, 122, 255, 0.35);
+  --move-preview-fill-invalid: rgba(0, 122, 255, 0.55);
+  --move-preview-border: rgba(0, 122, 255, 0.9);
+  --move-preview-border-invalid: rgba(0, 80, 180, 1);
   --paint-preview-fill: rgba(0, 255, 142, 0.55);
   --paint-preview-fill-invalid: rgba(0, 220, 140, 0.75);
   --paint-preview-border: rgba(0, 200, 120, 1);
@@ -351,10 +351,39 @@ body {
   color: var(--ios-text-primary);
   margin: 0;
   position: relative;
+  transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.sprite-item:hover {
+  transform: scale(1.02);
+  transform-origin: left center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  z-index: 1;
 }
 
 .sprite-item:nth-of-type(even) {
   background: var(--glyph-row-even);
+}
+
+.sprite-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background-color: transparent;
+  z-index: 10;
+  transition: background-color 120ms ease-out;
+  pointer-events: none;
+}
+
+.sprite-item:hover::before {
+  background-color: #ffcc00;
+}
+
+.sprite-item.active::before {
+  background-color: #34c759;
 }
 
 .sprite-item::after {
@@ -366,11 +395,11 @@ body {
 }
 
 .sprite-item:hover::after {
-  background: var(--glyph-row-hover-overlay);
+  background: transparent;
 }
 
 .sprite-item.active::after {
-  background: var(--glyph-row-active-overlay);
+  background: transparent;
 }
 
 .sprite-thumb {
@@ -575,8 +604,8 @@ body {
   background: var(--move-preview-fill);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.35) inset,
-    0 0 0 1px rgba(220, 30, 30, 0.75),
-    0 0 14px rgba(220, 30, 30, 0.5);
+    0 0 0 1px rgba(0, 122, 255, 0.75),
+    0 0 14px rgba(0, 122, 255, 0.4);
   z-index: 8;
 }
 
@@ -584,7 +613,7 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(255, 40, 40, 0.22);
+  background: rgba(0, 122, 255, 0.15);
   pointer-events: none;
   z-index: 3;
 }
