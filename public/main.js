@@ -683,8 +683,27 @@ function create_cell(x, y) {
   el.appendChild(ent_text);
   return el;
 }
+function sprite_id2(name, ix, iy) {
+  const pad_x = String(ix).padStart(2, "0");
+  const pad_y = String(iy).padStart(2, "0");
+  return `${name}_${pad_x}_${pad_y}`;
+}
 function create_visual_renderer(stage_el, grid_el, overlay_el) {
   const tile_dom = new Map;
+  let selection_layer = null;
+  let preview_layer = null;
+  function ensure_overlay_layers() {
+    if (!selection_layer) {
+      selection_layer = document.createElement("div");
+      selection_layer.className = "overlay-selection-layer";
+      overlay_el.appendChild(selection_layer);
+    }
+    if (!preview_layer) {
+      preview_layer = document.createElement("div");
+      preview_layer.className = "overlay-preview-layer";
+      overlay_el.appendChild(preview_layer);
+    }
+  }
   function set_transform(viewport) {
     const tx = viewport.offset_x;
     const ty = viewport.offset_y;
@@ -695,6 +714,9 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
     tile_dom.clear();
     grid_el.innerHTML = "";
     overlay_el.innerHTML = "";
+    selection_layer = null;
+    preview_layer = null;
+    ensure_overlay_layers();
     grid_el.style.width = `${grid.width * TILE_SIZE}px`;
     grid_el.style.height = `${grid.height * TILE_SIZE}px`;
     overlay_el.style.width = `${grid.width * TILE_SIZE}px`;
@@ -745,7 +767,11 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
     return { x, y };
   }
   function set_selection(rect) {
-    overlay_el.innerHTML = "";
+    ensure_overlay_layers();
+    if (!selection_layer) {
+      return;
+    }
+    selection_layer.innerHTML = "";
     if (!rect) {
       return;
     }
@@ -755,7 +781,118 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
     marker.style.top = `${rect.y * TILE_SIZE}px`;
     marker.style.width = `${rect.w * TILE_SIZE}px`;
     marker.style.height = `${rect.h * TILE_SIZE}px`;
-    overlay_el.appendChild(marker);
+    selection_layer.appendChild(marker);
+  }
+  function set_move_preview(rect, source_rect, invalid = false) {
+    ensure_overlay_layers();
+    if (!preview_layer) {
+      return;
+    }
+    preview_layer.innerHTML = "";
+    if (!rect) {
+      return;
+    }
+    const preview = document.createElement("div");
+    preview.className = "move-preview";
+    if (invalid) {
+      preview.classList.add("invalid");
+    }
+    preview.style.left = `${rect.x * TILE_SIZE}px`;
+    preview.style.top = `${rect.y * TILE_SIZE}px`;
+    preview.style.width = `${rect.w * TILE_SIZE}px`;
+    preview.style.height = `${rect.h * TILE_SIZE}px`;
+    if (source_rect) {
+      for (let dy = 0;dy < rect.h; dy++) {
+        for (let dx = 0;dx < rect.w; dx++) {
+          const source_x = source_rect.x + dx;
+          const source_y = source_rect.y + dy;
+          const source = tile_dom.get(cell_key(source_x, source_y));
+          if (!source) {
+            continue;
+          }
+          const preview_tile = document.createElement("div");
+          preview_tile.className = "move-preview-tile";
+          preview_tile.style.left = `${dx * TILE_SIZE}px`;
+          preview_tile.style.top = `${dy * TILE_SIZE}px`;
+          preview_tile.style.width = `${TILE_SIZE}px`;
+          preview_tile.style.height = `${TILE_SIZE}px`;
+          const source_floor = source.querySelector(".tile-floor-img");
+          const source_entity = source.querySelector(".tile-entity-img");
+          if (source_floor?.src) {
+            const floor = document.createElement("img");
+            floor.className = "move-preview-floor";
+            floor.alt = "";
+            floor.src = source_floor.src;
+            preview_tile.appendChild(floor);
+          }
+          if (source_entity?.src) {
+            const entity = document.createElement("img");
+            entity.className = "move-preview-entity";
+            entity.alt = "";
+            entity.src = source_entity.src;
+            preview_tile.appendChild(entity);
+          }
+          preview.appendChild(preview_tile);
+        }
+      }
+    }
+    preview_layer.appendChild(preview);
+  }
+  function set_paint_preview(rect, token, invalid = false) {
+    ensure_overlay_layers();
+    if (!preview_layer) {
+      return;
+    }
+    preview_layer.innerHTML = "";
+    if (!rect || !token) {
+      return;
+    }
+    const preview = document.createElement("div");
+    preview.className = "move-preview paint-preview";
+    if (invalid) {
+      preview.classList.add("invalid");
+    }
+    preview.style.left = `${rect.x * TILE_SIZE}px`;
+    preview.style.top = `${rect.y * TILE_SIZE}px`;
+    preview.style.width = `${rect.w * TILE_SIZE}px`;
+    preview.style.height = `${rect.h * TILE_SIZE}px`;
+    for (let iy = 0;iy < rect.h; iy++) {
+      for (let ix = 0;ix < rect.w; ix++) {
+        const tile = document.createElement("div");
+        tile.className = "move-preview-tile";
+        tile.style.left = `${ix * TILE_SIZE}px`;
+        tile.style.top = `${iy * TILE_SIZE}px`;
+        tile.style.width = `${TILE_SIZE}px`;
+        tile.style.height = `${TILE_SIZE}px`;
+        if (token.kind === "entity" && token.sprite) {
+          const entity = document.createElement("img");
+          entity.className = "move-preview-entity";
+          entity.alt = "";
+          entity.src = `VibiMon/assets/${token.sprite}_front_stand.png`;
+          tile.appendChild(entity);
+        } else if (token.kind === "building") {
+          const floor = document.createElement("img");
+          floor.className = "move-preview-floor";
+          floor.alt = "";
+          if (token.name.startsWith("icon_")) {
+            floor.src = `VibiMon/assets/${token.name}.png`;
+          } else if (token.width > 1 || token.height > 1) {
+            floor.src = `VibiMon/assets/${sprite_id2(token.name, ix, iy)}.png`;
+          } else {
+            floor.src = `VibiMon/assets/${sprite_id2(token.name, 0, 0)}.png`;
+          }
+          tile.appendChild(floor);
+        } else if (token.kind === "bordered") {
+          const floor = document.createElement("img");
+          floor.className = "move-preview-floor";
+          floor.alt = "";
+          floor.src = `VibiMon/assets/${token.name}_center.png`;
+          tile.appendChild(floor);
+        }
+        preview.appendChild(tile);
+      }
+    }
+    preview_layer.appendChild(preview);
   }
   function zoom_to_point(next_zoom, client_x, client_y) {
     const rect = stage_rect();
@@ -781,6 +918,8 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
     set_transform,
     hit_test,
     set_selection,
+    set_move_preview,
+    set_paint_preview,
     stage_rect,
     zoom_to_point
   };
@@ -816,7 +955,7 @@ function clamp_delta_for_rect(rect, dx, dy) {
   const ndy = Math.max(min_dy, Math.min(max_dy, dy));
   return [ndx, ndy];
 }
-function sprite_id2(name, ix, iy) {
+function sprite_id3(name, ix, iy) {
   const pad_x = String(ix).padStart(2, "0");
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}`;
@@ -835,7 +974,7 @@ function preview_asset(token) {
     if (token.name.startsWith("icon_")) {
       return `VibiMon/assets/${token.name}.png`;
     }
-    return `VibiMon/assets/${sprite_id2(token.name, 0, 0)}.png`;
+    return `VibiMon/assets/${sprite_id3(token.name, 0, 0)}.png`;
   }
   return "VibiMon/assets/tile_grass_00_00.png";
 }
@@ -849,10 +988,33 @@ function refresh_status() {
   ].join(" | ");
   set_status(refs, text);
 }
+function refresh_interaction_ui() {
+  refs.visual_stage.dataset.tool = state.tool;
+  const blocked = state.mode === "visual" && state.tool === "paint" && !state.selected_token;
+  refs.visual_stage.classList.toggle("is-action-blocked", blocked);
+  refs.visual_stage.classList.toggle("is-panning", is_space_down);
+}
+function clear_move_preview() {
+  visual.set_move_preview(null);
+}
+function paint_preview_for_cell(cell) {
+  if (!cell || state.mode !== "visual" || state.tool !== "paint" || !state.selected_token) {
+    visual.set_paint_preview(null);
+    return;
+  }
+  const token = state.selected_token;
+  const w = Math.max(1, token.width || 1);
+  const h = Math.max(1, token.height || 1);
+  const rect = { x: cell.x, y: cell.y, w, h };
+  const invalid = rect.x + rect.w > state.grid.width || rect.y + rect.h > state.grid.height;
+  visual.set_paint_preview(rect, token, invalid);
+}
 function rebuild_visual() {
   visual.rebuild_grid(state.grid, token_by_key);
   visual.set_transform(state.viewport);
   visual.set_selection(state.move_selection);
+  clear_move_preview();
+  visual.set_paint_preview(null);
 }
 function sync_grid_and_views() {
   visual.refresh_grid(state.grid, token_by_key);
@@ -866,21 +1028,27 @@ function sync_grid_and_views() {
 function set_mode(mode) {
   state.mode = mode;
   set_mode_ui(refs, mode);
+  clear_move_preview();
+  visual.set_paint_preview(null);
   if (mode === "raw") {
     refs.raw_textarea.value = state.raw_text;
     refs.raw_textarea.focus();
   } else {
     rebuild_visual();
   }
+  refresh_interaction_ui();
   refresh_status();
 }
 function set_tool(tool) {
   state.tool = tool;
   set_tool_ui(refs, tool);
+  clear_move_preview();
+  visual.set_paint_preview(null);
   if (tool !== "move") {
     state.move_selection = null;
     visual.set_selection(null);
   }
+  refresh_interaction_ui();
   refresh_status();
 }
 function select_token(token) {
@@ -892,6 +1060,7 @@ function select_token(token) {
     }
     child.classList.toggle("active", child.dataset.spriteId === token.token);
   }
+  refresh_interaction_ui();
   refresh_status();
 }
 function render_token_list() {
@@ -977,7 +1146,9 @@ function on_visual_pointer_down(ev) {
       base_offset_x: state.viewport.offset_x,
       base_offset_y: state.viewport.offset_y
     };
+    refs.visual_stage.classList.add("is-grabbing");
     refs.visual_stage.setPointerCapture(ev.pointerId);
+    visual.set_paint_preview(null);
     return;
   }
   if (ev.button !== 0) {
@@ -1047,7 +1218,9 @@ function on_visual_pointer_down(ev) {
   visual.set_selection(normalize_rect(cell.x, cell.y, cell.x, cell.y));
 }
 function on_visual_pointer_move(ev) {
+  const cell = cell_from_event(ev);
   if (!pointer_drag) {
+    paint_preview_for_cell(cell);
     return;
   }
   if (pointer_drag.kind === "pan") {
@@ -1058,8 +1231,8 @@ function on_visual_pointer_move(ev) {
     visual.set_transform(state.viewport);
     return;
   }
-  const cell = cell_from_event(ev);
   if (!cell) {
+    paint_preview_for_cell(null);
     return;
   }
   if (pointer_drag.kind === "paint") {
@@ -1073,25 +1246,38 @@ function on_visual_pointer_move(ev) {
     pointer_drag.last_cell = key;
     apply_paint_at(state.grid, cell.x, cell.y, state.selected_token);
     sync_grid_and_views();
+    clear_move_preview();
+    paint_preview_for_cell(cell);
     return;
   }
   if (pointer_drag.kind === "rubber_rect") {
     pointer_drag.end_x = cell.x;
     pointer_drag.end_y = cell.y;
-    const rect = normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y);
-    visual.set_selection(rect);
+    const rect2 = normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y);
+    visual.set_selection(rect2);
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
   if (pointer_drag.kind === "move_single") {
     pointer_drag.to_x = cell.x;
     pointer_drag.to_y = cell.y;
-    visual.set_selection({ x: cell.x, y: cell.y, w: 1, h: 1 });
+    const rect2 = { x: cell.x, y: cell.y, w: 1, h: 1 };
+    visual.set_selection(rect2);
+    visual.set_move_preview(rect2, {
+      x: pointer_drag.from_x,
+      y: pointer_drag.from_y,
+      w: 1,
+      h: 1
+    });
     return;
   }
   if (pointer_drag.kind === "move_select") {
     pointer_drag.end_x = cell.x;
     pointer_drag.end_y = cell.y;
     visual.set_selection(normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y));
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
   const raw_dx = cell.x - pointer_drag.start_x;
@@ -1099,24 +1285,37 @@ function on_visual_pointer_move(ev) {
   const [dx, dy] = clamp_delta_for_rect(pointer_drag.origin, raw_dx, raw_dy);
   pointer_drag.delta_x = dx;
   pointer_drag.delta_y = dy;
-  visual.set_selection({
+  const rect = {
     x: pointer_drag.origin.x + dx,
     y: pointer_drag.origin.y + dy,
     w: pointer_drag.origin.w,
     h: pointer_drag.origin.h
+  };
+  visual.set_selection(rect);
+  visual.set_move_preview(rect, {
+    x: pointer_drag.origin.x,
+    y: pointer_drag.origin.y,
+    w: pointer_drag.origin.w,
+    h: pointer_drag.origin.h
   });
+  visual.set_paint_preview(null);
 }
 function on_visual_pointer_up(ev) {
   if (!pointer_drag) {
     return;
   }
   refs.visual_stage.releasePointerCapture(ev.pointerId);
+  refs.visual_stage.classList.remove("is-grabbing");
   if (pointer_drag.kind === "pan") {
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
   if (pointer_drag.kind === "paint") {
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
   if (pointer_drag.kind === "rubber_rect") {
@@ -1124,6 +1323,8 @@ function on_visual_pointer_up(ev) {
     apply_erase_rect(state.grid, rect);
     visual.set_selection(null);
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     sync_grid_and_views();
     return;
   }
@@ -1132,6 +1333,8 @@ function on_visual_pointer_up(ev) {
     state.move_selection = null;
     visual.set_selection(null);
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     sync_grid_and_views();
     return;
   }
@@ -1140,6 +1343,8 @@ function on_visual_pointer_up(ev) {
     state.move_selection = rect;
     visual.set_selection(rect);
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     refresh_status();
     return;
   }
@@ -1153,6 +1358,8 @@ function on_visual_pointer_up(ev) {
   };
   visual.set_selection(state.move_selection);
   pointer_drag = null;
+  clear_move_preview();
+  visual.set_paint_preview(null);
   sync_grid_and_views();
 }
 function bind_events() {
@@ -1189,6 +1396,10 @@ function bind_events() {
   refs.visual_stage.addEventListener("dragstart", (ev) => {
     ev.preventDefault();
   });
+  refs.visual_stage.addEventListener("pointerleave", () => {
+    visual.set_paint_preview(null);
+    clear_move_preview();
+  });
   refs.visual_stage.addEventListener("wheel", (ev) => {
     if (!ev.ctrlKey && !ev.metaKey) {
       return;
@@ -1203,17 +1414,23 @@ function bind_events() {
   window.addEventListener("keydown", (ev) => {
     if (ev.key === " ") {
       is_space_down = true;
-      refs.visual_stage.classList.add("is-panning");
+      refresh_interaction_ui();
     }
     if (ev.key === "0") {
       state.viewport = { zoom: 1, offset_x: 0, offset_y: 0 };
       visual.set_transform(state.viewport);
     }
+    if (ev.key === "Control" || ev.key === "Meta") {
+      refs.visual_stage.classList.add("is-zoom-key");
+    }
   });
   window.addEventListener("keyup", (ev) => {
     if (ev.key === " ") {
       is_space_down = false;
-      refs.visual_stage.classList.remove("is-panning");
+      refresh_interaction_ui();
+    }
+    if (ev.key === "Control" || ev.key === "Meta") {
+      refs.visual_stage.classList.remove("is-zoom-key");
     }
   });
 }
@@ -1234,6 +1451,7 @@ async function init_tokens() {
     select_token(tokens[0]);
   }
   rebuild_visual();
+  refresh_interaction_ui();
 }
 function bootstrap() {
   refs.raw_textarea.value = state.raw_text;
@@ -1242,6 +1460,7 @@ function bootstrap() {
   set_raw_error(refs, null);
   rebuild_visual();
   bind_events();
+  refresh_interaction_ui();
   refresh_status();
   init_tokens();
 }

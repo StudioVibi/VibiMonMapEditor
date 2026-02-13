@@ -11,6 +11,16 @@ export interface VisualRenderer {
   set_transform(viewport: T.ViewportState): void;
   hit_test(client_x: number, client_y: number): { x: number; y: number } | null;
   set_selection(rect: T.SelectionRect | null): void;
+  set_move_preview(
+    rect: T.SelectionRect | null,
+    source_rect?: T.SelectionRect | null,
+    invalid?: boolean
+  ): void;
+  set_paint_preview(
+    rect: T.SelectionRect | null,
+    token?: T.GlyphToken | null,
+    invalid?: boolean
+  ): void;
   stage_rect(): DOMRect;
   zoom_to_point(next_zoom: number, client_x: number, client_y: number): T.ViewportState;
 }
@@ -88,12 +98,33 @@ function create_cell(x: number, y: number): HTMLDivElement {
   return el;
 }
 
+function sprite_id(name: string, ix: number, iy: number): string {
+  const pad_x = String(ix).padStart(2, "0");
+  const pad_y = String(iy).padStart(2, "0");
+  return `${name}_${pad_x}_${pad_y}`;
+}
+
 export function create_visual_renderer(
   stage_el: HTMLDivElement,
   grid_el: HTMLDivElement,
   overlay_el: HTMLDivElement
 ): VisualRenderer {
   const tile_dom = new Map<string, HTMLDivElement>();
+  let selection_layer: HTMLDivElement | null = null;
+  let preview_layer: HTMLDivElement | null = null;
+
+  function ensure_overlay_layers(): void {
+    if (!selection_layer) {
+      selection_layer = document.createElement("div");
+      selection_layer.className = "overlay-selection-layer";
+      overlay_el.appendChild(selection_layer);
+    }
+    if (!preview_layer) {
+      preview_layer = document.createElement("div");
+      preview_layer.className = "overlay-preview-layer";
+      overlay_el.appendChild(preview_layer);
+    }
+  }
 
   function set_transform(viewport: T.ViewportState): void {
     const tx = viewport.offset_x;
@@ -106,6 +137,9 @@ export function create_visual_renderer(
     tile_dom.clear();
     grid_el.innerHTML = "";
     overlay_el.innerHTML = "";
+    selection_layer = null;
+    preview_layer = null;
+    ensure_overlay_layers();
 
     grid_el.style.width = `${grid.width * TILE_SIZE}px`;
     grid_el.style.height = `${grid.height * TILE_SIZE}px`;
@@ -165,7 +199,11 @@ export function create_visual_renderer(
   }
 
   function set_selection(rect: T.SelectionRect | null): void {
-    overlay_el.innerHTML = "";
+    ensure_overlay_layers();
+    if (!selection_layer) {
+      return;
+    }
+    selection_layer.innerHTML = "";
     if (!rect) {
       return;
     }
@@ -175,7 +213,141 @@ export function create_visual_renderer(
     marker.style.top = `${rect.y * TILE_SIZE}px`;
     marker.style.width = `${rect.w * TILE_SIZE}px`;
     marker.style.height = `${rect.h * TILE_SIZE}px`;
-    overlay_el.appendChild(marker);
+    selection_layer.appendChild(marker);
+  }
+
+  function set_move_preview(
+    rect: T.SelectionRect | null,
+    source_rect?: T.SelectionRect | null,
+    invalid = false
+  ): void {
+    ensure_overlay_layers();
+    if (!preview_layer) {
+      return;
+    }
+    preview_layer.innerHTML = "";
+    if (!rect) {
+      return;
+    }
+
+    const preview = document.createElement("div");
+    preview.className = "move-preview";
+    if (invalid) {
+      preview.classList.add("invalid");
+    }
+    preview.style.left = `${rect.x * TILE_SIZE}px`;
+    preview.style.top = `${rect.y * TILE_SIZE}px`;
+    preview.style.width = `${rect.w * TILE_SIZE}px`;
+    preview.style.height = `${rect.h * TILE_SIZE}px`;
+
+    if (source_rect) {
+      for (let dy = 0; dy < rect.h; dy++) {
+        for (let dx = 0; dx < rect.w; dx++) {
+          const source_x = source_rect.x + dx;
+          const source_y = source_rect.y + dy;
+          const source = tile_dom.get(cell_key(source_x, source_y));
+          if (!source) {
+            continue;
+          }
+
+          const preview_tile = document.createElement("div");
+          preview_tile.className = "move-preview-tile";
+          preview_tile.style.left = `${dx * TILE_SIZE}px`;
+          preview_tile.style.top = `${dy * TILE_SIZE}px`;
+          preview_tile.style.width = `${TILE_SIZE}px`;
+          preview_tile.style.height = `${TILE_SIZE}px`;
+
+          const source_floor = source.querySelector(".tile-floor-img") as HTMLImageElement | null;
+          const source_entity = source.querySelector(".tile-entity-img") as HTMLImageElement | null;
+
+          if (source_floor?.src) {
+            const floor = document.createElement("img");
+            floor.className = "move-preview-floor";
+            floor.alt = "";
+            floor.src = source_floor.src;
+            preview_tile.appendChild(floor);
+          }
+
+          if (source_entity?.src) {
+            const entity = document.createElement("img");
+            entity.className = "move-preview-entity";
+            entity.alt = "";
+            entity.src = source_entity.src;
+            preview_tile.appendChild(entity);
+          }
+
+          preview.appendChild(preview_tile);
+        }
+      }
+    }
+
+    preview_layer.appendChild(preview);
+  }
+
+  function set_paint_preview(
+    rect: T.SelectionRect | null,
+    token?: T.GlyphToken | null,
+    invalid = false
+  ): void {
+    ensure_overlay_layers();
+    if (!preview_layer) {
+      return;
+    }
+    preview_layer.innerHTML = "";
+    if (!rect || !token) {
+      return;
+    }
+
+    const preview = document.createElement("div");
+    preview.className = "move-preview paint-preview";
+    if (invalid) {
+      preview.classList.add("invalid");
+    }
+    preview.style.left = `${rect.x * TILE_SIZE}px`;
+    preview.style.top = `${rect.y * TILE_SIZE}px`;
+    preview.style.width = `${rect.w * TILE_SIZE}px`;
+    preview.style.height = `${rect.h * TILE_SIZE}px`;
+
+    for (let iy = 0; iy < rect.h; iy++) {
+      for (let ix = 0; ix < rect.w; ix++) {
+        const tile = document.createElement("div");
+        tile.className = "move-preview-tile";
+        tile.style.left = `${ix * TILE_SIZE}px`;
+        tile.style.top = `${iy * TILE_SIZE}px`;
+        tile.style.width = `${TILE_SIZE}px`;
+        tile.style.height = `${TILE_SIZE}px`;
+
+        if (token.kind === "entity" && token.sprite) {
+          const entity = document.createElement("img");
+          entity.className = "move-preview-entity";
+          entity.alt = "";
+          entity.src = `VibiMon/assets/${token.sprite}_front_stand.png`;
+          tile.appendChild(entity);
+        } else if (token.kind === "building") {
+          const floor = document.createElement("img");
+          floor.className = "move-preview-floor";
+          floor.alt = "";
+          if (token.name.startsWith("icon_")) {
+            floor.src = `VibiMon/assets/${token.name}.png`;
+          } else if (token.width > 1 || token.height > 1) {
+            floor.src = `VibiMon/assets/${sprite_id(token.name, ix, iy)}.png`;
+          } else {
+            floor.src = `VibiMon/assets/${sprite_id(token.name, 0, 0)}.png`;
+          }
+          tile.appendChild(floor);
+        } else if (token.kind === "bordered") {
+          const floor = document.createElement("img");
+          floor.className = "move-preview-floor";
+          floor.alt = "";
+          floor.src = `VibiMon/assets/${token.name}_center.png`;
+          tile.appendChild(floor);
+        }
+
+        preview.appendChild(tile);
+      }
+    }
+
+    preview_layer.appendChild(preview);
   }
 
   function zoom_to_point(
@@ -209,6 +381,8 @@ export function create_visual_renderer(
     set_transform,
     hit_test,
     set_selection,
+    set_move_preview,
+    set_paint_preview,
     stage_rect,
     zoom_to_point
   };

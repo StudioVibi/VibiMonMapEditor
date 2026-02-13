@@ -128,10 +128,37 @@ function refresh_status(): void {
   Dom.set_status(refs, text);
 }
 
+function refresh_interaction_ui(): void {
+  refs.visual_stage.dataset.tool = state.tool;
+  const blocked = state.mode === "visual" && state.tool === "paint" && !state.selected_token;
+  refs.visual_stage.classList.toggle("is-action-blocked", blocked);
+  refs.visual_stage.classList.toggle("is-panning", is_space_down);
+}
+
+function clear_move_preview(): void {
+  visual.set_move_preview(null);
+}
+
+function paint_preview_for_cell(cell: { x: number; y: number } | null): void {
+  if (!cell || state.mode !== "visual" || state.tool !== "paint" || !state.selected_token) {
+    visual.set_paint_preview(null);
+    return;
+  }
+
+  const token = state.selected_token;
+  const w = Math.max(1, token.width || 1);
+  const h = Math.max(1, token.height || 1);
+  const rect = { x: cell.x, y: cell.y, w, h };
+  const invalid = rect.x + rect.w > state.grid.width || rect.y + rect.h > state.grid.height;
+  visual.set_paint_preview(rect, token, invalid);
+}
+
 function rebuild_visual(): void {
   visual.rebuild_grid(state.grid, token_by_key);
   visual.set_transform(state.viewport);
   visual.set_selection(state.move_selection);
+  clear_move_preview();
+  visual.set_paint_preview(null);
 }
 
 function sync_grid_and_views(): void {
@@ -147,22 +174,28 @@ function sync_grid_and_views(): void {
 function set_mode(mode: T.ViewMode): void {
   state.mode = mode;
   Dom.set_mode_ui(refs, mode);
+  clear_move_preview();
+  visual.set_paint_preview(null);
   if (mode === "raw") {
     refs.raw_textarea.value = state.raw_text;
     refs.raw_textarea.focus();
   } else {
     rebuild_visual();
   }
+  refresh_interaction_ui();
   refresh_status();
 }
 
 function set_tool(tool: T.Tool): void {
   state.tool = tool;
   Dom.set_tool_ui(refs, tool);
+  clear_move_preview();
+  visual.set_paint_preview(null);
   if (tool !== "move") {
     state.move_selection = null;
     visual.set_selection(null);
   }
+  refresh_interaction_ui();
   refresh_status();
 }
 
@@ -175,6 +208,7 @@ function select_token(token: T.GlyphToken): void {
     }
     child.classList.toggle("active", child.dataset.spriteId === token.token);
   }
+  refresh_interaction_ui();
   refresh_status();
 }
 
@@ -281,7 +315,9 @@ function on_visual_pointer_down(ev: PointerEvent): void {
       base_offset_x: state.viewport.offset_x,
       base_offset_y: state.viewport.offset_y
     };
+    refs.visual_stage.classList.add("is-grabbing");
     refs.visual_stage.setPointerCapture(ev.pointerId);
+    visual.set_paint_preview(null);
     return;
   }
 
@@ -360,7 +396,10 @@ function on_visual_pointer_down(ev: PointerEvent): void {
 }
 
 function on_visual_pointer_move(ev: PointerEvent): void {
+  const cell = cell_from_event(ev);
+
   if (!pointer_drag) {
+    paint_preview_for_cell(cell);
     return;
   }
 
@@ -373,8 +412,8 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     return;
   }
 
-  const cell = cell_from_event(ev);
   if (!cell) {
+    paint_preview_for_cell(null);
     return;
   }
 
@@ -389,6 +428,8 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     pointer_drag.last_cell = key;
     Tools.apply_paint_at(state.grid, cell.x, cell.y, state.selected_token);
     sync_grid_and_views();
+    clear_move_preview();
+    paint_preview_for_cell(cell);
     return;
   }
 
@@ -402,13 +443,22 @@ function on_visual_pointer_move(ev: PointerEvent): void {
       pointer_drag.end_y
     );
     visual.set_selection(rect);
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
 
   if (pointer_drag.kind === "move_single") {
     pointer_drag.to_x = cell.x;
     pointer_drag.to_y = cell.y;
-    visual.set_selection({ x: cell.x, y: cell.y, w: 1, h: 1 });
+    const rect = { x: cell.x, y: cell.y, w: 1, h: 1 };
+    visual.set_selection(rect);
+    visual.set_move_preview(rect, {
+      x: pointer_drag.from_x,
+      y: pointer_drag.from_y,
+      w: 1,
+      h: 1
+    });
     return;
   }
 
@@ -423,6 +473,8 @@ function on_visual_pointer_move(ev: PointerEvent): void {
         pointer_drag.end_y
       )
     );
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
 
@@ -431,12 +483,20 @@ function on_visual_pointer_move(ev: PointerEvent): void {
   const [dx, dy] = clamp_delta_for_rect(pointer_drag.origin, raw_dx, raw_dy);
   pointer_drag.delta_x = dx;
   pointer_drag.delta_y = dy;
-  visual.set_selection({
+  const rect = {
     x: pointer_drag.origin.x + dx,
     y: pointer_drag.origin.y + dy,
     w: pointer_drag.origin.w,
     h: pointer_drag.origin.h
+  };
+  visual.set_selection(rect);
+  visual.set_move_preview(rect, {
+    x: pointer_drag.origin.x,
+    y: pointer_drag.origin.y,
+    w: pointer_drag.origin.w,
+    h: pointer_drag.origin.h
   });
+  visual.set_paint_preview(null);
 }
 
 function on_visual_pointer_up(ev: PointerEvent): void {
@@ -445,14 +505,19 @@ function on_visual_pointer_up(ev: PointerEvent): void {
   }
 
   refs.visual_stage.releasePointerCapture(ev.pointerId);
+  refs.visual_stage.classList.remove("is-grabbing");
 
   if (pointer_drag.kind === "pan") {
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
 
   if (pointer_drag.kind === "paint") {
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
 
@@ -466,6 +531,8 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     Tools.apply_erase_rect(state.grid, rect);
     visual.set_selection(null);
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     sync_grid_and_views();
     return;
   }
@@ -481,6 +548,8 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     state.move_selection = null;
     visual.set_selection(null);
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     sync_grid_and_views();
     return;
   }
@@ -495,6 +564,8 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     state.move_selection = rect;
     visual.set_selection(rect);
     pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
     refresh_status();
     return;
   }
@@ -513,6 +584,8 @@ function on_visual_pointer_up(ev: PointerEvent): void {
   };
   visual.set_selection(state.move_selection);
   pointer_drag = null;
+  clear_move_preview();
+  visual.set_paint_preview(null);
   sync_grid_and_views();
 }
 
@@ -554,6 +627,10 @@ function bind_events(): void {
   refs.visual_stage.addEventListener("dragstart", (ev) => {
     ev.preventDefault();
   });
+  refs.visual_stage.addEventListener("pointerleave", () => {
+    visual.set_paint_preview(null);
+    clear_move_preview();
+  });
 
   refs.visual_stage.addEventListener("wheel", (ev) => {
     if (!ev.ctrlKey && !ev.metaKey) {
@@ -570,18 +647,24 @@ function bind_events(): void {
   window.addEventListener("keydown", (ev) => {
     if (ev.key === " ") {
       is_space_down = true;
-      refs.visual_stage.classList.add("is-panning");
+      refresh_interaction_ui();
     }
     if (ev.key === "0") {
       state.viewport = { zoom: 1, offset_x: 0, offset_y: 0 };
       visual.set_transform(state.viewport);
+    }
+    if (ev.key === "Control" || ev.key === "Meta") {
+      refs.visual_stage.classList.add("is-zoom-key");
     }
   });
 
   window.addEventListener("keyup", (ev) => {
     if (ev.key === " ") {
       is_space_down = false;
-      refs.visual_stage.classList.remove("is-panning");
+      refresh_interaction_ui();
+    }
+    if (ev.key === "Control" || ev.key === "Meta") {
+      refs.visual_stage.classList.remove("is-zoom-key");
     }
   });
 }
@@ -606,6 +689,7 @@ async function init_tokens(): Promise<void> {
   }
 
   rebuild_visual();
+  refresh_interaction_ui();
 }
 
 function bootstrap(): void {
@@ -615,6 +699,7 @@ function bootstrap(): void {
   Dom.set_raw_error(refs, null);
   rebuild_visual();
   bind_events();
+  refresh_interaction_ui();
   refresh_status();
   void init_tokens();
 }

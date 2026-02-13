@@ -22,6 +22,16 @@
   --glyph-row-hover-overlay: rgba(255, 255, 255, 0.42);
   --glyph-row-active-overlay: rgba(0, 0, 0, 0.05);
   --glyph-thumb-size: 36px;
+  --cursor-hotspot-x: 12;
+  --cursor-hotspot-y: 12;
+  --move-preview-fill: rgba(255, 66, 66, 0.42);
+  --move-preview-fill-invalid: rgba(255, 40, 40, 0.56);
+  --move-preview-border: rgba(220, 30, 30, 0.98);
+  --move-preview-border-invalid: rgba(140, 8, 8, 1);
+  --paint-preview-fill: rgba(0, 255, 142, 0.55);
+  --paint-preview-fill-invalid: rgba(0, 220, 140, 0.75);
+  --paint-preview-border: rgba(0, 200, 120, 1);
+  --paint-preview-border-invalid: rgba(0, 170, 100, 1);
   --tile: 58px;
   --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", "Menlo", monospace;
@@ -103,7 +113,7 @@ body {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  cursor: pointer;
+  cursor: url("/assets/cursors/Pointer.svg") 4 4, pointer;
   transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
@@ -165,7 +175,7 @@ body {
   border: 1px solid transparent;
   background: transparent;
   color: var(--ios-text-primary);
-  cursor: pointer;
+  cursor: url("/assets/cursors/Pointer.svg") 4 4, pointer;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 
@@ -304,7 +314,7 @@ body {
   gap: 10px;
   text-align: left;
   padding: 8px 14px;
-  cursor: pointer;
+  cursor: url("/assets/cursors/Pointer.svg") 4 4, pointer;
   color: var(--ios-text-primary);
   margin: 0;
   position: relative;
@@ -413,15 +423,42 @@ body {
   position: relative;
   height: calc(100% - 40px);
   overflow: hidden;
-  cursor: default;
+  cursor: url("/assets/cursors/Arrow.svg") 2 2, default;
   background: var(--canvas);
   -webkit-user-select: none;
   -moz-user-select: none;
   user-select: none;
 }
 
+.visual-stage[data-tool="move"] {
+  cursor: url("/assets/cursors/Move.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), move;
+}
+
+.visual-stage[data-tool="paint"] {
+  cursor: url("/assets/cursors/Pointer.svg") 4 4, crosshair;
+}
+
+.visual-stage[data-tool="rubber"] {
+  cursor: url("/assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
+    not-allowed;
+}
+
 .visual-stage.is-panning {
-  cursor: grab;
+  cursor: url("/assets/cursors/Grab.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), grab;
+}
+
+.visual-stage.is-grabbing {
+  cursor: url("/assets/cursors/Grabbed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
+    grabbing;
+}
+
+.visual-stage.is-zoom-key {
+  cursor: url("/assets/cursors/ZoomIn.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), zoom-in;
+}
+
+.visual-stage.is-action-blocked {
+  cursor: url("/assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
+    not-allowed;
 }
 
 .visual-grid,
@@ -437,6 +474,12 @@ body {
 
 .visual-overlay {
   pointer-events: none;
+}
+
+.overlay-selection-layer,
+.overlay-preview-layer {
+  position: absolute;
+  inset: 0;
 }
 
 .tile-cell {
@@ -490,6 +533,66 @@ body {
   position: absolute;
   border: 1px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.move-preview {
+  position: absolute;
+  overflow: hidden;
+  border: 2px solid var(--move-preview-border);
+  background: var(--move-preview-fill);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.35) inset,
+    0 0 0 1px rgba(220, 30, 30, 0.75),
+    0 0 14px rgba(220, 30, 30, 0.5);
+  z-index: 8;
+}
+
+.move-preview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 40, 40, 0.22);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.move-preview.invalid {
+  background: var(--move-preview-fill-invalid);
+  border-color: var(--move-preview-border-invalid);
+}
+
+.move-preview.paint-preview {
+  border-color: var(--paint-preview-border);
+  background: var(--paint-preview-fill);
+}
+
+.move-preview.paint-preview.invalid {
+  background: var(--paint-preview-fill-invalid);
+  border-color: var(--paint-preview-border-invalid);
+}
+
+.move-preview-floor,
+.move-preview-entity {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.move-preview-floor {
+  z-index: 1;
+}
+
+.move-preview-entity {
+  z-index: 2;
+}
+
+.move-preview-tile {
+  position: absolute;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 .raw-panel {
@@ -558,4 +661,7 @@ body {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+}
+.move-preview.paint-preview::before {
+  background: rgba(0, 255, 142, 0.35);
 }
