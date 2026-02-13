@@ -1154,6 +1154,12 @@ function bind_events() {
   refs.visual_stage.addEventListener("pointermove", on_visual_pointer_move);
   refs.visual_stage.addEventListener("pointerup", on_visual_pointer_up);
   refs.visual_stage.addEventListener("pointercancel", on_visual_pointer_up);
+  refs.visual_stage.addEventListener("selectstart", (ev) => {
+    ev.preventDefault();
+  });
+  refs.visual_stage.addEventListener("dragstart", (ev) => {
+    ev.preventDefault();
+  });
   refs.visual_stage.addEventListener("wheel", (ev) => {
     if (!ev.ctrlKey && !ev.metaKey) {
       return;

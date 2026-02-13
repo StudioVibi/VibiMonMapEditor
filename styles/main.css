@@ -255,6 +255,9 @@ body {
   overflow: hidden;
   cursor: default;
   background: #f9fcf7;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
 }
 
 .visual-stage.is-panning {
@@ -267,6 +270,9 @@ body {
   left: 0;
   top: 0;
   transform-origin: 0 0;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
 }
 
 .visual-overlay {
@@ -278,6 +284,9 @@ body {
   border: 1px solid rgba(47, 51, 47, 0.18);
   background: #e5ebdf;
   overflow: hidden;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
 }
 
 .tile-floor-img,
@@ -295,6 +304,7 @@ body {
 }
 
 .tile-floor-glyph {
+  display: none;
   position: absolute;
   left: 4px;
   bottom: 3px;
@@ -308,6 +318,7 @@ body {
 }
 
 .tile-entity-glyph {
+  display: none;
   position: absolute;
   right: 4px;
   top: 3px;
