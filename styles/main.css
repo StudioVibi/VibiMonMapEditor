@@ -109,18 +109,36 @@ body {
   color: var(--muted);
   height: 28px;
   padding: 0 10px;
-  border-radius: var(--ios-radius-pill);
+  border-radius: 0;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   cursor: url("/assets/cursors/Pointer.svg") 4 4, pointer;
-  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  position: relative;
+  transition: color 150ms ease;
+}
+
+.mode-btn::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 4px;
+  width: 0;
+  height: 2px;
+  background: var(--ios-text-primary);
+  transition: width 150ms ease-out;
+}
+
+.mode-btn:hover::after {
+  width: 100%;
 }
 
 .mode-btn.active {
-  background: var(--ios-surface-0);
   color: var(--ios-text-primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.mode-btn.active::after {
+  width: 100%;
 }
 
 .mode-btn:focus-visible,
@@ -193,13 +211,18 @@ body {
   content: "";
   position: absolute;
   left: 50%;
-  top: 50%;
+  bottom: calc((100% - var(--tool-active-square-size)) / 2);
   width: var(--tool-active-square-size);
-  height: var(--tool-active-square-size);
+  height: 0;
   border-radius: var(--tool-active-square-radius);
-  transform: translate(-50%, -50%);
-  background: transparent;
+  transform: translateX(-50%);
+  background: var(--tool-active-square);
   z-index: 0;
+  transition: height 150ms ease-out;
+}
+
+.tool-btn.icon-only:hover::before {
+  height: var(--tool-active-square-size);
 }
 
 .tool-btn.icon-only img {
@@ -209,6 +232,11 @@ body {
   filter: grayscale(1) contrast(1.08);
   position: relative;
   z-index: 1;
+  transition: transform 150ms ease-out;
+}
+
+.tool-btn.icon-only:hover img {
+  transform: scale(1.15);
 }
 
 .rubber-btn span {
@@ -219,11 +247,16 @@ body {
   font-weight: 600;
   position: relative;
   z-index: 1;
+  transition: transform 150ms ease-out;
 }
 
-.tool-btn:hover {
-  border-color: var(--line);
-  background: var(--ios-surface-1);
+.rubber-btn:hover span {
+  transform: scale(0.53);
+}
+
+.tool-btn.icon-only:hover {
+  border-color: transparent;
+  background: transparent;
 }
 
 .tool-btn.active {
@@ -232,7 +265,7 @@ body {
 }
 
 .tool-btn.icon-only.active::before {
-  background: var(--tool-active-square);
+  height: var(--tool-active-square-size);
 }
 
 .paint-panel {
