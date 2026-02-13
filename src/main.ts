@@ -757,6 +757,7 @@ function bind_events(): void {
     select_highlighted_glyph,
     dismiss: dismiss_search,
     focus_glyph_search: () => refs.sprite_search.focus(),
+    toggle_viewport: () => set_mode(state.mode === "raw" ? "visual" : "raw"),
   });
 }
 

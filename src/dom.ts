@@ -65,7 +65,7 @@ export function mount_app(root: HTMLElement): DomRefs {
         <section class="workspace">
           <div id="visual-panel" class="panel visual-panel active">
             <div class="visual-toolbar">
-              <span>Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0</span>
+              <span>Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
             </div>
             <div id="visual-stage" class="visual-stage">
               <div id="visual-grid" class="visual-grid"></div>

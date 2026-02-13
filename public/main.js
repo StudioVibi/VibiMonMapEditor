@@ -43,7 +43,7 @@ function mount_app(root) {
         <section class="workspace">
           <div id="visual-panel" class="panel visual-panel active">
             <div class="visual-toolbar">
-              <span>Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0</span>
+              <span>Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
             </div>
             <div id="visual-stage" class="visual-stage">
               <div id="visual-grid" class="visual-grid"></div>
@@ -199,7 +199,8 @@ var SHORTCUTS = {
   ArrowUp: { type: "navigate", direction: "up" },
   ArrowDown: { type: "navigate", direction: "down" },
   Enter: { type: "select-glyph" },
-  Escape: { type: "dismiss" }
+  Escape: { type: "dismiss" },
+  Tab: { type: "toggle-viewport" }
 };
 function bind_shortcuts(handlers) {
   const handle_keydown = (ev) => {
@@ -227,6 +228,9 @@ function bind_shortcuts(handlers) {
         break;
       case "dismiss":
         handlers.dismiss();
+        break;
+      case "toggle-viewport":
+        handlers.toggle_viewport();
         break;
     }
   };
@@ -1551,7 +1555,8 @@ function bind_events() {
     navigate_glyphs,
     select_highlighted_glyph,
     dismiss: dismiss_search,
-    focus_glyph_search: () => refs.sprite_search.focus()
+    focus_glyph_search: () => refs.sprite_search.focus(),
+    toggle_viewport: () => set_mode(state.mode === "raw" ? "visual" : "raw")
   });
 }
 async function init_tokens() {

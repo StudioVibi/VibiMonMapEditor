@@ -4,7 +4,8 @@ export type ShortcutAction =
   | { type: "tool"; tool: Tool }
   | { type: "navigate"; direction: "up" | "down" }
   | { type: "select-glyph" }
-  | { type: "dismiss" };
+  | { type: "dismiss" }
+  | { type: "toggle-viewport" };
 
 export const SHORTCUTS: Record<string, ShortcutAction> = {
   m: { type: "tool", tool: "move" },
@@ -14,6 +15,7 @@ export const SHORTCUTS: Record<string, ShortcutAction> = {
   ArrowDown: { type: "navigate", direction: "down" },
   Enter: { type: "select-glyph" },
   Escape: { type: "dismiss" },
+  Tab: { type: "toggle-viewport" },
 };
 
 export interface ShortcutHandlers {
@@ -22,6 +24,7 @@ export interface ShortcutHandlers {
   select_highlighted_glyph: () => void;
   dismiss: () => void;
   focus_glyph_search: () => void;
+  toggle_viewport: () => void;
 }
 
 export function bind_shortcuts(handlers: ShortcutHandlers): () => void {
@@ -53,6 +56,9 @@ export function bind_shortcuts(handlers: ShortcutHandlers): () => void {
         break;
       case "dismiss":
         handlers.dismiss();
+        break;
+      case "toggle-viewport":
+        handlers.toggle_viewport();
         break;
     }
   };
