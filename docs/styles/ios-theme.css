@@ -1,0 +1,21 @@
+:root {
+  --ios-bg-base: #f2f2f7;
+  --ios-bg-canvas: #eef0f4;
+  --ios-surface-0: #ffffff;
+  --ios-surface-1: #f8f8fa;
+  --ios-surface-2: #ececf1;
+  --ios-border-hairline: #d1d1d6;
+  --ios-border-strong: #c7c7cc;
+  --ios-text-primary: #1c1c1e;
+  --ios-text-secondary: #636366;
+  --ios-text-tertiary: #8e8e93;
+  --ios-accent: #007aff;
+  --ios-accent-soft: #e6f0ff;
+  --ios-focus-ring: rgba(0, 122, 255, 0.35);
+  --ios-danger: #ff3b30;
+  --ios-radius-sm: 6px;
+  --ios-radius-md: 8px;
+  --ios-radius-pill: 999px;
+  --ios-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.06), 0 3px 10px rgba(0, 0, 0, 0.04);
+  --ios-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
