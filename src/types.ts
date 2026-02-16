@@ -20,6 +20,24 @@ export interface ViewportState {
   offset_y: number;
 }
 
+export interface SharedCameraState {
+  center_tile_x: number;
+  center_tile_y: number;
+  visual_zoom: number;
+}
+
+export interface RawViewportState {
+  font_size_px: number;
+  char_width_px: number;
+  line_height_px: number;
+  scroll_left: number;
+  scroll_top: number;
+}
+
+export interface SyncViewState {
+  enabled: boolean;
+}
+
 export interface SelectionRect {
   x: number;
   y: number;
@@ -47,6 +65,9 @@ export interface EditorState {
   selected_token_key: string | null;
   selected_token: GlyphToken | null;
   viewport: ViewportState;
+  shared_camera: SharedCameraState;
+  raw_viewport: RawViewportState;
+  sync_view: SyncViewState;
   raw_text: string;
   raw_error: string | null;
   last_valid_grid: GridState;

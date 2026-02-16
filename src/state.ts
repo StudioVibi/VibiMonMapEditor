@@ -14,6 +14,21 @@ export function create_initial_state(): T.EditorState {
       offset_x: 0,
       offset_y: 0
     },
+    shared_camera: {
+      center_tile_x: grid.width / 2,
+      center_tile_y: grid.height / 2,
+      visual_zoom: 1
+    },
+    raw_viewport: {
+      font_size_px: 13,
+      char_width_px: 8,
+      line_height_px: 15.6,
+      scroll_left: 0,
+      scroll_top: 0
+    },
+    sync_view: {
+      enabled: false
+    },
     raw_text: Raw.serialize_raw(grid),
     raw_error: null,
     last_valid_grid: Raw.clone_grid(grid),

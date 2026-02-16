@@ -1,4 +1,5 @@
 import * as Dom from "./dom";
+import * as Cam from "./camera-sync";
 import * as Cat from "./glyph-catalog";
 import * as Shortcuts from "./keyboard-shortcuts";
 import * as St from "./state";
@@ -8,6 +9,8 @@ import { DEFAULT_FLOOR_ASSET, VIBIMON_ASSET_ROOT } from "./vibimon-resolver";
 import * as Visual from "./visual-render";
 
 const raw_debounce_ms = 180;
+const raw_font_min_px = 8;
+const raw_font_max_px = 96;
 
 const root = document.querySelector("#app");
 if (!root) {
@@ -132,6 +135,7 @@ function refresh_status(): void {
     : "none";
   const text = [
     `Mode: ${state.mode.toUpperCase()}`,
+    `Sync: ${state.sync_view.enabled ? "ON" : "OFF"}`,
     `Tool: ${state.tool}`,
     `Grid: ${state.grid.width}x${state.grid.height}`,
     `Glyph: ${picked}`
@@ -182,17 +186,127 @@ function sync_grid_and_views(): void {
   refresh_status();
 }
 
+function clamp_camera_to_grid(camera: T.SharedCameraState): T.SharedCameraState {
+  const max_x = Math.max(0, state.grid.width - 1);
+  const max_y = Math.max(0, state.grid.height - 1);
+  return {
+    center_tile_x: Math.max(0, Math.min(max_x, camera.center_tile_x)),
+    center_tile_y: Math.max(0, Math.min(max_y, camera.center_tile_y)),
+    visual_zoom: camera.visual_zoom
+  };
+}
+
+function capture_camera_from_visual(): void {
+  const stage = visual.stage_rect();
+  state.shared_camera = clamp_camera_to_grid(
+    Cam.visual_to_camera(state.viewport, { width: stage.width, height: stage.height })
+  );
+}
+
+function capture_camera_from_raw(): void {
+  const metrics = Cam.measure_raw_metrics(refs.raw_textarea);
+  state.raw_viewport = metrics;
+  const viewport = Cam.read_raw_viewport_size(refs.raw_textarea);
+  const visual_zoom = Cam.raw_font_px_to_visual_zoom(metrics.font_size_px, metrics);
+  state.shared_camera = clamp_camera_to_grid(
+    Cam.raw_scroll_to_camera(metrics, viewport, visual_zoom)
+  );
+}
+
+function apply_camera_to_visual(): void {
+  const stage = visual.stage_rect();
+  state.viewport = Cam.camera_to_visual(
+    state.shared_camera,
+    { width: stage.width, height: stage.height }
+  );
+}
+
+function raw_selection_range_for_tile(tile_x: number, tile_y: number): { start: number; end: number } | null {
+  if (tile_x < 0 || tile_y < 0) {
+    return null;
+  }
+  const lines = state.raw_text.split("\n");
+  const line_index = tile_y * 2 + 1;
+  if (line_index < 0 || line_index >= lines.length) {
+    return null;
+  }
+
+  const line = lines[line_index];
+  if (!line) {
+    return null;
+  }
+
+  const start_col = Math.max(0, Math.min(Math.max(0, line.length - 4), tile_x * 4));
+  let offset = 0;
+  for (let i = 0; i < line_index; i++) {
+    offset += lines[i].length + 1;
+  }
+
+  const start = offset + start_col;
+  const end = Math.min(start + 4, offset + line.length);
+  if (end <= start) {
+    return null;
+  }
+  return { start, end };
+}
+
+function focus_raw_tile_from_camera(): void {
+  const tile_x = Math.max(0, Math.min(state.grid.width - 1, Math.floor(state.shared_camera.center_tile_x)));
+  const tile_y = Math.max(0, Math.min(state.grid.height - 1, Math.floor(state.shared_camera.center_tile_y)));
+  const range = raw_selection_range_for_tile(tile_x, tile_y);
+  if (!range) {
+    return;
+  }
+  refs.raw_textarea.setSelectionRange(range.start, range.end);
+}
+
+function apply_camera_to_raw(): void {
+  const base_metrics = Cam.measure_raw_metrics(refs.raw_textarea);
+  const target_font = Cam.visual_zoom_to_raw_font_px(state.shared_camera.visual_zoom, base_metrics);
+  const clamped_font = Math.max(raw_font_min_px, Math.min(raw_font_max_px, target_font));
+  refs.raw_textarea.style.fontSize = `${clamped_font}px`;
+
+  const next_metrics = Cam.measure_raw_metrics(refs.raw_textarea);
+  const viewport = Cam.read_raw_viewport_size(refs.raw_textarea);
+  const scroll = Cam.camera_to_raw_scroll(state.shared_camera, next_metrics, viewport);
+  refs.raw_textarea.scrollLeft = scroll.left;
+  refs.raw_textarea.scrollTop = scroll.top;
+  state.raw_viewport = Cam.measure_raw_metrics(refs.raw_textarea);
+  focus_raw_tile_from_camera();
+}
+
 function set_mode(mode: T.ViewMode): void {
+  if (mode === state.mode) {
+    return;
+  }
+
+  const from_mode = state.mode;
+  if (state.sync_view.enabled) {
+    if (from_mode === "visual" && mode === "raw") {
+      capture_camera_from_visual();
+    } else if (from_mode === "raw" && mode === "visual") {
+      capture_camera_from_raw();
+    }
+  }
+
   state.mode = mode;
   Dom.set_mode_ui(refs, mode);
   clear_move_preview();
   visual.set_paint_preview(null);
+
   if (mode === "raw") {
     refs.raw_textarea.value = state.raw_text;
+    if (state.sync_view.enabled && from_mode === "visual") {
+      apply_camera_to_raw();
+    }
     refs.raw_textarea.focus();
   } else {
+    if (state.sync_view.enabled && from_mode === "raw") {
+      apply_camera_to_visual();
+    }
     rebuild_visual();
   }
+
   refresh_interaction_ui();
   refresh_status();
 }
@@ -682,6 +796,11 @@ function on_visual_pointer_up(ev: PointerEvent): void {
 function bind_events(): void {
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
   refs.mode_visual_btn.addEventListener("click", () => set_mode("visual"));
+  refs.sync_view_btn.addEventListener("click", () => {
+    state.sync_view.enabled = !state.sync_view.enabled;
+    Dom.set_sync_view_ui(refs, state.sync_view.enabled);
+    refresh_status();
+  });
 
   refs.tool_move_btn.addEventListener("click", () => set_tool("move"));
   refs.tool_paint_btn.addEventListener("click", () => set_tool("paint"));
@@ -706,6 +825,21 @@ function bind_events(): void {
       refresh_status();
     }, raw_debounce_ms);
   });
+  refs.raw_textarea.addEventListener("wheel", (ev) => {
+    if (!ev.ctrlKey && !ev.metaKey) {
+      return;
+    }
+    ev.preventDefault();
+    const metrics = Cam.measure_raw_metrics(refs.raw_textarea);
+    const factor = ev.deltaY < 0 ? 1.1 : 0.9;
+    const next_font = Math.max(
+      raw_font_min_px,
+      Math.min(raw_font_max_px, metrics.font_size_px * factor)
+    );
+    refs.raw_textarea.style.fontSize = `${next_font}px`;
+    state.raw_viewport = Cam.measure_raw_metrics(refs.raw_textarea);
+    refresh_status();
+  }, { passive: false });
 
   refs.visual_stage.addEventListener("pointerdown", on_visual_pointer_down);
   refs.visual_stage.addEventListener("pointermove", on_visual_pointer_move);
@@ -794,6 +928,7 @@ async function init_tokens(): Promise<void> {
 function bootstrap(): void {
   refs.raw_textarea.value = state.raw_text;
   Dom.set_mode_ui(refs, state.mode);
+  Dom.set_sync_view_ui(refs, state.sync_view.enabled);
   Dom.set_tool_ui(refs, state.tool);
   Dom.set_raw_error(refs, null);
   rebuild_visual();

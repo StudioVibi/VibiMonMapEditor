@@ -96,6 +96,12 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.view-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0 14px;
   border: 0;
   border-radius: 0;
@@ -139,6 +145,10 @@ body {
 
 .mode-btn.active::after {
   width: 100%;
+}
+
+.sync-btn {
+  letter-spacing: 0.05em;
 }
 
 .mode-btn:focus-visible,
@@ -496,13 +506,17 @@ body {
 
 .workspace {
   min-height: 0;
+  height: 100%;
   position: relative;
+  overflow: hidden;
   background: var(--canvas);
 }
 
 .panel {
   display: none;
+  min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .panel.active {
@@ -511,6 +525,11 @@ body {
 
 .visual-panel {
   min-height: 0;
+}
+
+.visual-panel.active {
+  display: grid;
+  grid-template-rows: 40px 1fr;
 }
 
 .visual-toolbar {
@@ -527,7 +546,8 @@ body {
 
 .visual-stage {
   position: relative;
-  height: calc(100% - 40px);
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
   cursor: url("../assets/cursors/Arrow.svg") 2 2, default;
   background: var(--canvas);
@@ -703,11 +723,14 @@ body {
 
 .raw-panel {
   height: 100%;
+  padding: 12px;
+  background: var(--canvas);
+}
+
+.raw-panel.active {
   display: grid;
   grid-template-rows: 1fr auto;
   gap: 8px;
-  padding: 12px;
-  background: var(--canvas);
 }
 
 #raw-text {
