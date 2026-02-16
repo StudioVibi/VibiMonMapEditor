@@ -796,8 +796,8 @@ function on_visual_pointer_up(ev: PointerEvent): void {
 function bind_events(): void {
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
   refs.mode_visual_btn.addEventListener("click", () => set_mode("visual"));
-  refs.sync_view_btn.addEventListener("click", () => {
-    state.sync_view.enabled = !state.sync_view.enabled;
+  refs.sync_view_toggle.addEventListener("change", () => {
+    state.sync_view.enabled = refs.sync_view_toggle.checked;
     Dom.set_sync_view_ui(refs, state.sync_view.enabled);
     refresh_status();
   });
@@ -899,6 +899,11 @@ function bind_events(): void {
     dismiss: dismiss_search,
     focus_glyph_search: () => refs.sprite_search.focus(),
     toggle_viewport: () => set_mode(state.mode === "raw" ? "visual" : "raw"),
+    toggle_sync_view: () => {
+      state.sync_view.enabled = !state.sync_view.enabled;
+      Dom.set_sync_view_ui(refs, state.sync_view.enabled);
+      refresh_status();
+    },
   });
 }
 

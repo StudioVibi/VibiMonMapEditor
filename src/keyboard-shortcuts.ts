@@ -5,12 +5,14 @@ export type ShortcutAction =
   | { type: "navigate"; direction: "up" | "down" }
   | { type: "select-glyph" }
   | { type: "dismiss" }
-  | { type: "toggle-viewport" };
+  | { type: "toggle-viewport" }
+  | { type: "toggle-sync-view" };
 
 export const SHORTCUTS: Record<string, ShortcutAction> = {
   m: { type: "tool", tool: "move" },
   p: { type: "tool", tool: "paint" },
   d: { type: "tool", tool: "rubber" },
+  s: { type: "toggle-sync-view" },
   ArrowUp: { type: "navigate", direction: "up" },
   ArrowDown: { type: "navigate", direction: "down" },
   Enter: { type: "select-glyph" },
@@ -25,6 +27,7 @@ export interface ShortcutHandlers {
   dismiss: () => void;
   focus_glyph_search: () => void;
   toggle_viewport: () => void;
+  toggle_sync_view: () => void;
 }
 
 export function bind_shortcuts(handlers: ShortcutHandlers): () => void {
@@ -59,6 +62,9 @@ export function bind_shortcuts(handlers: ShortcutHandlers): () => void {
         break;
       case "toggle-viewport":
         handlers.toggle_viewport();
+        break;
+      case "toggle-sync-view":
+        handlers.toggle_sync_view();
         break;
     }
   };

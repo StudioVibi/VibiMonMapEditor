@@ -4,7 +4,7 @@ export interface DomRefs {
   app: HTMLDivElement;
   mode_raw_btn: HTMLButtonElement;
   mode_visual_btn: HTMLButtonElement;
-  sync_view_btn: HTMLButtonElement;
+  sync_view_toggle: HTMLInputElement;
   tool_move_btn: HTMLButtonElement;
   tool_paint_btn: HTMLButtonElement;
   tool_rubber_btn: HTMLButtonElement;
@@ -32,12 +32,9 @@ export function mount_app(root: HTMLElement): DomRefs {
         <div class="topbar-col topbar-col-main">
           <div class="map-name"></div>
         </div>
-        <div class="view-controls">
-          <div class="mode-toggle" role="tablist" aria-label="Render mode">
-            <button id="mode-raw" class="mode-btn" type="button">RAW</button>
-            <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
-          </div>
-          <button id="sync-view" class="mode-btn sync-btn" type="button" aria-pressed="false">SYNC VIEW</button>
+        <div class="mode-toggle" role="tablist" aria-label="Render mode">
+          <button id="mode-raw" class="mode-btn" type="button">RAW</button>
+          <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
         </div>
       </header>
       <main class="main-layout">
@@ -69,7 +66,12 @@ export function mount_app(root: HTMLElement): DomRefs {
         <section class="workspace">
           <div id="visual-panel" class="panel visual-panel active">
             <div class="visual-toolbar">
-              <span>Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
+              <span class="visual-toolbar-hints">Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
+              <label class="sync-toggle" for="sync-view">
+                <input id="sync-view" class="sync-toggle-input" type="checkbox" />
+                <span class="sync-toggle-track" aria-hidden="true"></span>
+                <span class="sync-toggle-text">Sync View <span class="sync-toggle-key">(S)</span></span>
+              </label>
             </div>
             <div id="visual-stage" class="visual-stage">
               <div id="visual-grid" class="visual-grid"></div>
@@ -92,7 +94,7 @@ export function mount_app(root: HTMLElement): DomRefs {
     app: root as HTMLDivElement,
     mode_raw_btn: root.querySelector("#mode-raw") as HTMLButtonElement,
     mode_visual_btn: root.querySelector("#mode-visual") as HTMLButtonElement,
-    sync_view_btn: root.querySelector("#sync-view") as HTMLButtonElement,
+    sync_view_toggle: root.querySelector("#sync-view") as HTMLInputElement,
     tool_move_btn: root.querySelector("#tool-move") as HTMLButtonElement,
     tool_paint_btn: root.querySelector("#tool-paint") as HTMLButtonElement,
     tool_rubber_btn: root.querySelector("#tool-rubber") as HTMLButtonElement,
@@ -119,8 +121,7 @@ export function set_mode_ui(refs: DomRefs, mode: T.ViewMode): void {
 }
 
 export function set_sync_view_ui(refs: DomRefs, enabled: boolean): void {
-  refs.sync_view_btn.classList.toggle("active", enabled);
-  refs.sync_view_btn.setAttribute("aria-pressed", enabled ? "true" : "false");
+  refs.sync_view_toggle.checked = enabled;
 }
 
 export function set_tool_ui(refs: DomRefs, tool: T.Tool): void {

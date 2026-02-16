@@ -9,12 +9,9 @@ function mount_app(root) {
         <div class="topbar-col topbar-col-main">
           <div class="map-name"></div>
         </div>
-        <div class="view-controls">
-          <div class="mode-toggle" role="tablist" aria-label="Render mode">
-            <button id="mode-raw" class="mode-btn" type="button">RAW</button>
-            <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
-          </div>
-          <button id="sync-view" class="mode-btn sync-btn" type="button" aria-pressed="false">SYNC VIEW</button>
+        <div class="mode-toggle" role="tablist" aria-label="Render mode">
+          <button id="mode-raw" class="mode-btn" type="button">RAW</button>
+          <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
         </div>
       </header>
       <main class="main-layout">
@@ -46,7 +43,12 @@ function mount_app(root) {
         <section class="workspace">
           <div id="visual-panel" class="panel visual-panel active">
             <div class="visual-toolbar">
-              <span>Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
+              <span class="visual-toolbar-hints">Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
+              <label class="sync-toggle" for="sync-view">
+                <input id="sync-view" class="sync-toggle-input" type="checkbox" />
+                <span class="sync-toggle-track" aria-hidden="true"></span>
+                <span class="sync-toggle-text">Sync View <span class="sync-toggle-key">(S)</span></span>
+              </label>
             </div>
             <div id="visual-stage" class="visual-stage">
               <div id="visual-grid" class="visual-grid"></div>
@@ -68,7 +70,7 @@ function mount_app(root) {
     app: root,
     mode_raw_btn: root.querySelector("#mode-raw"),
     mode_visual_btn: root.querySelector("#mode-visual"),
-    sync_view_btn: root.querySelector("#sync-view"),
+    sync_view_toggle: root.querySelector("#sync-view"),
     tool_move_btn: root.querySelector("#tool-move"),
     tool_paint_btn: root.querySelector("#tool-paint"),
     tool_rubber_btn: root.querySelector("#tool-rubber"),
@@ -93,8 +95,7 @@ function set_mode_ui(refs, mode) {
   refs.visual_panel.classList.toggle("active", mode === "visual");
 }
 function set_sync_view_ui(refs, enabled) {
-  refs.sync_view_btn.classList.toggle("active", enabled);
-  refs.sync_view_btn.setAttribute("aria-pressed", enabled ? "true" : "false");
+  refs.sync_view_toggle.checked = enabled;
 }
 function set_tool_ui(refs, tool) {
   refs.tool_move_btn.classList.toggle("active", tool === "move");
@@ -360,6 +361,7 @@ var SHORTCUTS = {
   m: { type: "tool", tool: "move" },
   p: { type: "tool", tool: "paint" },
   d: { type: "tool", tool: "rubber" },
+  s: { type: "toggle-sync-view" },
   ArrowUp: { type: "navigate", direction: "up" },
   ArrowDown: { type: "navigate", direction: "down" },
   Enter: { type: "select-glyph" },
@@ -395,6 +397,9 @@ function bind_shortcuts(handlers) {
         break;
       case "toggle-viewport":
         handlers.toggle_viewport();
+        break;
+      case "toggle-sync-view":
+        handlers.toggle_sync_view();
         break;
     }
   };
@@ -1771,8 +1776,8 @@ function on_visual_pointer_up(ev) {
 function bind_events() {
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
   refs.mode_visual_btn.addEventListener("click", () => set_mode("visual"));
-  refs.sync_view_btn.addEventListener("click", () => {
-    state.sync_view.enabled = !state.sync_view.enabled;
+  refs.sync_view_toggle.addEventListener("change", () => {
+    state.sync_view.enabled = refs.sync_view_toggle.checked;
     set_sync_view_ui(refs, state.sync_view.enabled);
     refresh_status();
   });
@@ -1862,7 +1867,12 @@ function bind_events() {
     select_highlighted_glyph,
     dismiss: dismiss_search,
     focus_glyph_search: () => refs.sprite_search.focus(),
-    toggle_viewport: () => set_mode(state.mode === "raw" ? "visual" : "raw")
+    toggle_viewport: () => set_mode(state.mode === "raw" ? "visual" : "raw"),
+    toggle_sync_view: () => {
+      state.sync_view.enabled = !state.sync_view.enabled;
+      set_sync_view_ui(refs, state.sync_view.enabled);
+      refresh_status();
+    }
   });
 }
 async function init_tokens() {
