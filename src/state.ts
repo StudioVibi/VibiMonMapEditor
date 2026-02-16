@@ -3,12 +3,19 @@ import type * as T from "./types";
 
 export function create_initial_state(): T.EditorState {
   const grid = Raw.make_empty_grid(20, 20);
+  const raw_text = Raw.serialize_raw(grid);
   return {
     grid,
     mode: "visual",
     tool: "move",
     selected_token_key: null,
     selected_token: null,
+    current_level_id: null,
+    current_level_name: null,
+    last_persisted_raw: raw_text,
+    is_dirty: false,
+    level_sort_mode: "recent",
+    modal_state: { kind: "none" },
     viewport: {
       zoom: 1,
       offset_x: 0,
@@ -29,7 +36,7 @@ export function create_initial_state(): T.EditorState {
     sync_view: {
       enabled: false
     },
-    raw_text: Raw.serialize_raw(grid),
+    raw_text,
     raw_error: null,
     last_valid_grid: Raw.clone_grid(grid),
     move_selection: null

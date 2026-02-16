@@ -3,11 +3,18 @@ function mount_app(root) {
   root.innerHTML = `
     <div class="editor-shell">
       <header class="topbar">
-        <div class="topbar-col">
+        <div class="topbar-col topbar-col-brand">
           <div class="project-title">Vibi Level Editor</div>
         </div>
         <div class="topbar-col topbar-col-main">
-          <div class="map-name"></div>
+          <div id="map-name" class="map-name"></div>
+        </div>
+        <div class="topbar-col topbar-col-actions">
+          <div class="topbar-actions">
+            <button id="action-save" class="topbar-action-btn" type="button">Save</button>
+            <button id="action-save-as" class="topbar-action-btn" type="button">Save As</button>
+            <button id="action-load" class="topbar-action-btn" type="button">Load</button>
+          </div>
         </div>
         <div class="mode-toggle" role="tablist" aria-label="Render mode">
           <button id="mode-raw" class="mode-btn" type="button">RAW</button>
@@ -64,10 +71,24 @@ function mount_app(root) {
       <footer class="statusbar">
         <div id="status-text"></div>
       </footer>
+      <div id="modal-root" class="modal-root" aria-hidden="true">
+        <div id="modal-backdrop" class="modal-backdrop"></div>
+        <div id="modal-window" class="modal-window" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <div class="modal-window-header">
+            <h2 id="modal-title" class="modal-title"></h2>
+            <button id="modal-close" class="modal-close" type="button" aria-label="Close dialog">Close</button>
+          </div>
+          <div id="modal-body" class="modal-body"></div>
+        </div>
+      </div>
     </div>
   `;
   return {
     app: root,
+    action_save_btn: root.querySelector("#action-save"),
+    action_save_as_btn: root.querySelector("#action-save-as"),
+    action_load_btn: root.querySelector("#action-load"),
+    map_name: root.querySelector("#map-name"),
     mode_raw_btn: root.querySelector("#mode-raw"),
     mode_visual_btn: root.querySelector("#mode-visual"),
     sync_view_toggle: root.querySelector("#sync-view"),
@@ -85,7 +106,13 @@ function mount_app(root) {
     sprite_search: root.querySelector("#sprite-search"),
     sprite_list: root.querySelector("#sprite-list"),
     sprite_meta: root.querySelector("#sprite-meta"),
-    status_text: root.querySelector("#status-text")
+    status_text: root.querySelector("#status-text"),
+    modal_root: root.querySelector("#modal-root"),
+    modal_backdrop: root.querySelector("#modal-backdrop"),
+    modal_window: root.querySelector("#modal-window"),
+    modal_title: root.querySelector("#modal-title"),
+    modal_body: root.querySelector("#modal-body"),
+    modal_close_btn: root.querySelector("#modal-close")
   };
 }
 function set_mode_ui(refs, mode) {
@@ -96,6 +123,19 @@ function set_mode_ui(refs, mode) {
 }
 function set_sync_view_ui(refs, enabled) {
   refs.sync_view_toggle.checked = enabled;
+}
+function set_map_name(refs, name) {
+  refs.map_name.textContent = name || "";
+}
+function set_modal_open(refs, open) {
+  refs.modal_root.classList.toggle("open", open);
+  refs.modal_root.setAttribute("aria-hidden", open ? "false" : "true");
+}
+function set_modal_title(refs, title) {
+  refs.modal_title.textContent = title;
+}
+function set_modal_close_visible(refs, visible) {
+  refs.modal_close_btn.hidden = !visible;
 }
 function set_tool_ui(refs, tool) {
   refs.tool_move_btn.classList.toggle("active", tool === "move");
@@ -109,6 +149,9 @@ function set_raw_error(refs, error) {
 }
 function set_status(refs, text) {
   refs.status_text.textContent = text;
+}
+function set_status_html(refs, html) {
+  refs.status_text.innerHTML = html;
 }
 
 // src/camera-sync.ts
@@ -357,54 +400,326 @@ function token_map(tokens) {
 }
 
 // src/keyboard-shortcuts.ts
-var SHORTCUTS = {
-  m: { type: "tool", tool: "move" },
-  p: { type: "tool", tool: "paint" },
-  d: { type: "tool", tool: "rubber" },
-  s: { type: "toggle-sync-view" },
-  ArrowUp: { type: "navigate", direction: "up" },
-  ArrowDown: { type: "navigate", direction: "down" },
-  Enter: { type: "select-glyph" },
-  Escape: { type: "dismiss" },
-  Tab: { type: "toggle-viewport" }
-};
+function consume(ev) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.stopImmediatePropagation();
+}
+function has_only_primary_modifier(ev) {
+  const primary_count = Number(ev.metaKey) + Number(ev.ctrlKey);
+  return primary_count === 1 && !ev.altKey;
+}
+function is_primary_combo(ev, key, shift) {
+  return has_only_primary_modifier(ev) && ev.shiftKey === shift && ev.key.toLowerCase() === key.toLowerCase();
+}
+function is_unmodified(ev, key) {
+  return !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey && ev.key.toLowerCase() === key.toLowerCase();
+}
+function is_unmodified_named(ev, key) {
+  return !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey && ev.key === key;
+}
+function is_tab_without_system_modifiers(ev) {
+  return ev.key === "Tab" && !ev.metaKey && !ev.ctrlKey && !ev.altKey;
+}
+function handle_editor_shortcuts(ev, ctx, handlers) {
+  if (is_tab_without_system_modifiers(ev)) {
+    consume(ev);
+    handlers.toggle_viewport();
+    return;
+  }
+  const navigation_keys = new Set(["ArrowUp", "ArrowDown", "Enter", "Escape"]);
+  if (ctx.in_text_entry && !navigation_keys.has(ev.key)) {
+    return;
+  }
+  if (is_unmodified(ev, "m")) {
+    consume(ev);
+    handlers.set_tool("move");
+    return;
+  }
+  if (is_unmodified(ev, "p")) {
+    consume(ev);
+    handlers.set_tool("paint");
+    handlers.focus_glyph_search();
+    return;
+  }
+  if (is_unmodified(ev, "d")) {
+    consume(ev);
+    handlers.set_tool("rubber");
+    return;
+  }
+  if (is_unmodified(ev, "s")) {
+    consume(ev);
+    handlers.toggle_sync_view();
+    return;
+  }
+  if (is_unmodified_named(ev, "ArrowUp")) {
+    consume(ev);
+    handlers.navigate_glyphs("up");
+    return;
+  }
+  if (is_unmodified_named(ev, "ArrowDown")) {
+    consume(ev);
+    handlers.navigate_glyphs("down");
+    return;
+  }
+  if (is_unmodified_named(ev, "Enter")) {
+    consume(ev);
+    handlers.select_highlighted_glyph();
+    return;
+  }
+  if (is_unmodified_named(ev, "Escape")) {
+    consume(ev);
+    handlers.dismiss();
+  }
+}
+function handle_load_modal_shortcuts(ev, ctx, handlers) {
+  if (is_tab_without_system_modifiers(ev)) {
+    consume(ev);
+    handlers.load_toggle_sort(ev.shiftKey ? "backward" : "forward");
+    return;
+  }
+  if (is_unmodified_named(ev, "Escape")) {
+    consume(ev);
+    handlers.dismiss();
+    return;
+  }
+  if (ctx.load_search_focused || ctx.in_text_entry) {
+    return;
+  }
+  if (is_unmodified_named(ev, "ArrowLeft")) {
+    consume(ev);
+    handlers.load_move_selection("left");
+    return;
+  }
+  if (is_unmodified_named(ev, "ArrowRight")) {
+    consume(ev);
+    handlers.load_move_selection("right");
+    return;
+  }
+  if (is_unmodified_named(ev, "ArrowUp")) {
+    consume(ev);
+    handlers.load_move_selection("up");
+    return;
+  }
+  if (is_unmodified_named(ev, "ArrowDown")) {
+    consume(ev);
+    handlers.load_move_selection("down");
+    return;
+  }
+  if (is_unmodified_named(ev, "Enter")) {
+    consume(ev);
+    handlers.load_activate_selection();
+  }
+}
+function handle_non_load_modal_shortcuts(ev, handlers) {
+  if (is_tab_without_system_modifiers(ev)) {
+    consume(ev);
+    return;
+  }
+  if (is_unmodified_named(ev, "Escape")) {
+    consume(ev);
+    handlers.dismiss();
+  }
+}
 function bind_shortcuts(handlers) {
   const handle_keydown = (ev) => {
-    const in_input = ev.target instanceof HTMLInputElement;
-    const navigation_keys = ["ArrowUp", "ArrowDown", "Enter", "Escape"];
-    if (in_input && !navigation_keys.includes(ev.key)) {
+    if (is_primary_combo(ev, "s", false)) {
+      consume(ev);
+      handlers.system_save();
       return;
     }
-    const action = SHORTCUTS[ev.key.toLowerCase()] || SHORTCUTS[ev.key];
-    if (!action)
+    if (is_primary_combo(ev, "s", true)) {
+      consume(ev);
+      handlers.system_save_as();
       return;
-    ev.preventDefault();
-    switch (action.type) {
-      case "tool":
-        handlers.set_tool(action.tool);
-        if (action.tool === "paint") {
-          handlers.focus_glyph_search();
-        }
-        break;
-      case "navigate":
-        handlers.navigate_glyphs(action.direction);
-        break;
-      case "select-glyph":
-        handlers.select_highlighted_glyph();
-        break;
-      case "dismiss":
-        handlers.dismiss();
-        break;
-      case "toggle-viewport":
-        handlers.toggle_viewport();
-        break;
-      case "toggle-sync-view":
-        handlers.toggle_sync_view();
-        break;
     }
+    if (is_primary_combo(ev, "o", false)) {
+      consume(ev);
+      handlers.system_load();
+      return;
+    }
+    const ctx = handlers.get_context();
+    if (ctx.modal_kind === "load") {
+      handle_load_modal_shortcuts(ev, ctx, handlers);
+      return;
+    }
+    if (ctx.modal_kind !== "none") {
+      handle_non_load_modal_shortcuts(ev, handlers);
+      return;
+    }
+    handle_editor_shortcuts(ev, ctx, handlers);
   };
   window.addEventListener("keydown", handle_keydown);
   return () => window.removeEventListener("keydown", handle_keydown);
+}
+
+// src/level-storage.ts
+var STORAGE_KEY = "vibimon_map_editor_levels_v1";
+function now_iso() {
+  return new Date().toISOString();
+}
+function normalize_name(name) {
+  return name.trim();
+}
+function make_id() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `lvl_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+}
+function safe_parse(raw) {
+  if (!raw) {
+    return { levels: [] };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.levels)) {
+      return { levels: [] };
+    }
+    const levels = [];
+    for (const item of parsed.levels) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const level = item;
+      if (typeof level.id !== "string" || typeof level.name !== "string" || typeof level.raw_text !== "string" || typeof level.grid_width !== "number" || typeof level.grid_height !== "number" || typeof level.created_at !== "string" || typeof level.updated_at !== "string") {
+        continue;
+      }
+      levels.push(level);
+    }
+    return { levels };
+  } catch {
+    return { levels: [] };
+  }
+}
+function read_collection() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return safe_parse(raw);
+}
+function write_collection(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+function sort_recent(levels) {
+  return [...levels].sort((a, b) => {
+    const at = Date.parse(a.updated_at);
+    const bt = Date.parse(b.updated_at);
+    return bt - at;
+  });
+}
+function unique_name(base_name, existing_levels, exclude_id) {
+  const normalized = normalize_name(base_name);
+  if (!normalized) {
+    throw new Error("Level name is required.");
+  }
+  const exists = (candidate) => {
+    const candidate_lower = candidate.toLowerCase();
+    for (const level of existing_levels) {
+      if (exclude_id && level.id === exclude_id) {
+        continue;
+      }
+      if (level.name.toLowerCase() === candidate_lower) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!exists(normalized)) {
+    return normalized;
+  }
+  let idx = 1;
+  while (true) {
+    const candidate = `${normalized} ${idx}`;
+    if (!exists(candidate)) {
+      return candidate;
+    }
+    idx += 1;
+  }
+}
+function list_levels() {
+  return sort_recent(read_collection().levels);
+}
+function get_level(id) {
+  for (const level of read_collection().levels) {
+    if (level.id === id) {
+      return level;
+    }
+  }
+  return null;
+}
+function search_levels(query) {
+  const q = query.trim().toLowerCase();
+  const levels = list_levels();
+  if (!q) {
+    return levels;
+  }
+  return levels.filter((level) => level.name.toLowerCase().includes(q));
+}
+function save_level(input) {
+  const normalized_name = normalize_name(input.name);
+  if (!normalized_name) {
+    throw new Error("Level name is required.");
+  }
+  const collection = read_collection();
+  const idx = input.id ? collection.levels.findIndex((level) => level.id === input.id) : -1;
+  const now = now_iso();
+  if (idx >= 0) {
+    const current = collection.levels[idx];
+    const next_name = unique_name(normalized_name, collection.levels, current.id);
+    const updated = {
+      ...current,
+      name: next_name,
+      raw_text: input.raw_text,
+      grid_width: input.grid_width,
+      grid_height: input.grid_height,
+      updated_at: now
+    };
+    collection.levels[idx] = updated;
+    write_collection(collection);
+    return updated;
+  }
+  const created = {
+    id: make_id(),
+    name: unique_name(normalized_name, collection.levels, null),
+    raw_text: input.raw_text,
+    grid_width: input.grid_width,
+    grid_height: input.grid_height,
+    created_at: now,
+    updated_at: now
+  };
+  collection.levels.push(created);
+  write_collection(collection);
+  return created;
+}
+function rename_level(id, name) {
+  const normalized_name = normalize_name(name);
+  if (!normalized_name) {
+    throw new Error("Level name is required.");
+  }
+  const collection = read_collection();
+  const idx = collection.levels.findIndex((level) => level.id === id);
+  if (idx < 0) {
+    return null;
+  }
+  const current = collection.levels[idx];
+  const next_name = unique_name(normalized_name, collection.levels, current.id);
+  const updated = {
+    ...current,
+    name: next_name,
+    updated_at: now_iso()
+  };
+  collection.levels[idx] = updated;
+  write_collection(collection);
+  return updated;
+}
+function delete_level(id) {
+  const collection = read_collection();
+  const before = collection.levels.length;
+  collection.levels = collection.levels.filter((level) => level.id !== id);
+  if (collection.levels.length === before) {
+    return false;
+  }
+  write_collection(collection);
+  return true;
 }
 
 // src/raw-format.ts
@@ -522,12 +837,19 @@ function parse_raw(text) {
 // src/state.ts
 function create_initial_state() {
   const grid = make_empty_grid(20, 20);
+  const raw_text = serialize_raw(grid);
   return {
     grid,
     mode: "visual",
     tool: "move",
     selected_token_key: null,
     selected_token: null,
+    current_level_id: null,
+    current_level_name: null,
+    last_persisted_raw: raw_text,
+    is_dirty: false,
+    level_sort_mode: "recent",
+    modal_state: { kind: "none" },
     viewport: {
       zoom: 1,
       offset_x: 0,
@@ -548,7 +870,7 @@ function create_initial_state() {
     sync_view: {
       enabled: false
     },
-    raw_text: serialize_raw(grid),
+    raw_text,
     raw_error: null,
     last_valid_grid: clone_grid(grid),
     move_selection: null
@@ -1182,6 +1504,13 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
 var raw_debounce_ms = 180;
 var raw_font_min_px = 8;
 var raw_font_max_px = 96;
+var preview_tile_size = 12;
+var preview_frame_width = 300;
+var preview_frame_height = 144;
+var date_formatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short"
+});
 var root = document.querySelector("#app");
 if (!root) {
   throw new Error("App root not found.");
@@ -1196,6 +1525,11 @@ var raw_timer = null;
 var is_space_down = false;
 var highlighted_glyph_index = -1;
 var filtered_tokens = [];
+var level_search_query = "";
+var load_selected_level_id = null;
+var modal_error_text = "";
+var status_flash_text = null;
+var status_flash_timer = null;
 var pointer_drag = null;
 function in_rect(x, y, rect) {
   return x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h;
@@ -1236,15 +1570,41 @@ function preview_asset(token) {
   return DEFAULT_FLOOR_ASSET;
 }
 function refresh_status() {
-  const picked = state.selected_token ? `${state.selected_token.token} ${state.selected_token.name}` : "none";
-  const text = [
+  if (status_flash_text) {
+    set_status_html(refs, `<span class="status-success">${escape_html(status_flash_text)}</span>`);
+    return;
+  }
+  let level_html = `<span class="status-unsaved">(unsaved)</span>`;
+  if (state.current_level_name) {
+    level_html = state.is_dirty ? `${escape_html(state.current_level_name)} <span class="status-unsaved">(unsaved)</span>` : escape_html(state.current_level_name);
+  }
+  const segments = [
+    `Level: ${level_html}`,
     `Mode: ${state.mode.toUpperCase()}`,
     `Sync: ${state.sync_view.enabled ? "ON" : "OFF"}`,
     `Tool: ${state.tool}`,
-    `Grid: ${state.grid.width}x${state.grid.height}`,
-    `Glyph: ${picked}`
-  ].join(" | ");
-  set_status(refs, text);
+    `Grid: ${state.grid.width}x${state.grid.height}`
+  ];
+  const html = segments.map((segment, idx) => idx === 0 ? segment : escape_html(segment)).join(' <span class="status-sep">|</span> ');
+  set_status_html(refs, html);
+}
+function flash_status(text, duration_ms = 2000) {
+  status_flash_text = text;
+  if (status_flash_timer !== null) {
+    window.clearTimeout(status_flash_timer);
+  }
+  set_status_html(refs, `<span class="status-success">${escape_html(text)}</span>`);
+  status_flash_timer = window.setTimeout(() => {
+    status_flash_text = null;
+    status_flash_timer = null;
+    refresh_status();
+  }, duration_ms);
+}
+function refresh_map_name() {
+  set_map_name(refs, state.current_level_name);
+}
+function update_dirty_flag() {
+  state.is_dirty = state.raw_text !== state.last_persisted_raw;
 }
 function refresh_interaction_ui() {
   refs.visual_stage.dataset.tool = state.tool;
@@ -1277,6 +1637,7 @@ function rebuild_visual() {
 function sync_grid_and_views() {
   visual.refresh_grid(state.grid, token_by_key);
   sync_raw_from_grid(state);
+  update_dirty_flag();
   if (state.mode === "raw") {
     refs.raw_textarea.value = state.raw_text;
   }
@@ -1354,6 +1715,651 @@ function apply_camera_to_raw() {
   refs.raw_textarea.scrollTop = scroll.top;
   state.raw_viewport = measure_raw_metrics(refs.raw_textarea);
   focus_raw_tile_from_camera();
+}
+function escape_html(text) {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+function sorted_levels(levels) {
+  if (state.level_sort_mode === "name") {
+    return [...levels].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }
+  return [...levels].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+}
+function set_modal_state(next) {
+  state.modal_state = next;
+  render_modal();
+}
+function close_modal() {
+  modal_error_text = "";
+  set_modal_state({ kind: "none" });
+}
+function open_save_modal(mode, error_text = "") {
+  modal_error_text = error_text;
+  set_modal_state({ kind: "save", mode });
+}
+function open_load_modal(reset_search = true) {
+  if (reset_search) {
+    level_search_query = "";
+  }
+  if (state.modal_state.kind !== "load") {
+    load_selected_level_id = state.current_level_id;
+  }
+  modal_error_text = "";
+  set_modal_state({ kind: "load" });
+}
+function set_saved_level_state(level) {
+  state.current_level_id = level.id;
+  state.current_level_name = level.name;
+  state.last_persisted_raw = state.raw_text;
+  update_dirty_flag();
+  refresh_map_name();
+  refresh_status();
+}
+function persist_level(name, id) {
+  const parsed = parse_raw(state.raw_text);
+  const width = parsed.ok ? parsed.grid.width : state.grid.width;
+  const height = parsed.ok ? parsed.grid.height : state.grid.height;
+  return save_level({
+    id,
+    name,
+    raw_text: state.raw_text,
+    grid_width: width,
+    grid_height: height
+  });
+}
+function save_current_level(name, mode) {
+  try {
+    const target_id = mode === "save-as" ? null : state.current_level_id;
+    const saved = persist_level(name, target_id);
+    set_saved_level_state(saved);
+    close_modal();
+    const prefix = mode === "save-as" ? "Saved as" : "Saved";
+    flash_status(`${prefix}: ${saved.name}`);
+  } catch (err) {
+    modal_error_text = `Save failed: ${String(err)}`;
+    render_modal();
+  }
+}
+function quick_save_current_level() {
+  if (!state.current_level_id || !state.current_level_name) {
+    open_save_modal("regular");
+    return;
+  }
+  try {
+    const saved = persist_level(state.current_level_name, state.current_level_id);
+    set_saved_level_state(saved);
+    flash_status(`Saved: ${saved.name}`);
+  } catch (err) {
+    open_save_modal("regular", `Save failed: ${String(err)}`);
+  }
+}
+function request_save_action() {
+  if (state.current_level_id) {
+    quick_save_current_level();
+    return;
+  }
+  open_save_modal("regular");
+}
+function request_save_as_action() {
+  open_save_modal("save-as");
+}
+function find_level(level_id) {
+  try {
+    return get_level(level_id);
+  } catch {
+    return null;
+  }
+}
+function apply_level_from_library(level_id) {
+  const level = find_level(level_id);
+  if (!level) {
+    modal_error_text = "Level not found in local storage.";
+    render_modal();
+    return;
+  }
+  const parsed = parse_raw(level.raw_text);
+  if (!parsed.ok) {
+    modal_error_text = `Could not load this level: ${parsed.error}`;
+    render_modal();
+    return;
+  }
+  state.raw_text = level.raw_text;
+  state.grid = parsed.grid;
+  state.last_valid_grid = clone_grid(parsed.grid);
+  state.raw_error = null;
+  state.move_selection = null;
+  refs.raw_textarea.value = state.raw_text;
+  set_raw_error(refs, null);
+  rebuild_visual();
+  state.current_level_id = level.id;
+  state.current_level_name = level.name;
+  state.last_persisted_raw = state.raw_text;
+  update_dirty_flag();
+  refresh_map_name();
+  refresh_status();
+  if (state.mode === "raw") {
+    refs.raw_textarea.focus();
+  }
+  close_modal();
+}
+function request_level_load(level_id) {
+  if (state.is_dirty && state.current_level_id !== level_id) {
+    modal_error_text = "";
+    set_modal_state({ kind: "confirm-discard", level_id });
+    return;
+  }
+  apply_level_from_library(level_id);
+}
+function preview_img(src, fallback_to_floor) {
+  const img = document.createElement("img");
+  img.alt = "";
+  img.draggable = false;
+  img.loading = "lazy";
+  img.onerror = () => {
+    if (fallback_to_floor && img.dataset.fallbackApplied !== "1") {
+      img.dataset.fallbackApplied = "1";
+      img.src = DEFAULT_FLOOR_ASSET;
+      return;
+    }
+    img.style.display = "none";
+  };
+  img.dataset.fallbackApplied = "0";
+  img.src = src;
+  return img;
+}
+function create_level_preview(level) {
+  const frame = document.createElement("div");
+  frame.className = "level-preview-frame";
+  const parsed = parse_raw(level.raw_text);
+  if (!parsed.ok) {
+    const invalid = document.createElement("div");
+    invalid.className = "level-preview-invalid";
+    invalid.textContent = "Invalid RAW";
+    frame.appendChild(invalid);
+    return frame;
+  }
+  const grid = parsed.grid;
+  const world = document.createElement("div");
+  world.className = "level-preview-world";
+  const world_w = grid.width * preview_tile_size;
+  const world_h = grid.height * preview_tile_size;
+  const scale = Math.min((preview_frame_width - 8) / world_w, (preview_frame_height - 8) / world_h, 1);
+  const offset_x = (preview_frame_width - world_w * scale) / 2;
+  const offset_y = (preview_frame_height - world_h * scale) / 2;
+  world.style.width = `${world_w}px`;
+  world.style.height = `${world_h}px`;
+  world.style.transform = `translate(${offset_x}px, ${offset_y}px) scale(${scale})`;
+  for (let y = 0;y < grid.height; y++) {
+    for (let x = 0;x < grid.width; x++) {
+      const data = resolve_cell_visual(grid, x, y, token_by_key);
+      const tile = document.createElement("div");
+      tile.className = "level-preview-tile";
+      tile.style.left = `${x * preview_tile_size}px`;
+      tile.style.top = `${y * preview_tile_size}px`;
+      tile.style.width = `${preview_tile_size}px`;
+      tile.style.height = `${preview_tile_size}px`;
+      if (data.floor_asset) {
+        const floor = preview_img(data.floor_asset, true);
+        floor.className = "level-preview-floor";
+        tile.appendChild(floor);
+      }
+      if (data.entity_asset) {
+        const ent = preview_img(data.entity_asset, false);
+        ent.className = "level-preview-entity";
+        tile.appendChild(ent);
+      }
+      world.appendChild(tile);
+    }
+  }
+  frame.appendChild(world);
+  return frame;
+}
+function level_meta(level) {
+  const updated = Date.parse(level.updated_at);
+  const when = Number.isFinite(updated) ? date_formatter.format(new Date(updated)) : level.updated_at;
+  return `${level.grid_width}x${level.grid_height} • ${when}`;
+}
+function get_load_cards() {
+  if (state.modal_state.kind !== "load") {
+    return [];
+  }
+  return Array.from(refs.modal_body.querySelectorAll(".level-card[data-level-id]"));
+}
+function refresh_load_selection_ui(scroll = false) {
+  const cards = get_load_cards();
+  for (const card of cards) {
+    card.classList.toggle("keyboard-selected", card.dataset.levelId === load_selected_level_id);
+  }
+  if (!scroll || !load_selected_level_id) {
+    return;
+  }
+  const selected = cards.find((card) => card.dataset.levelId === load_selected_level_id);
+  selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+function ensure_load_selection(levels) {
+  if (levels.length === 0) {
+    load_selected_level_id = null;
+    return;
+  }
+  const ids = new Set(levels.map((level) => level.id));
+  if (load_selected_level_id && ids.has(load_selected_level_id)) {
+    return;
+  }
+  if (state.current_level_id && ids.has(state.current_level_id)) {
+    load_selected_level_id = state.current_level_id;
+    return;
+  }
+  load_selected_level_id = levels[0].id;
+}
+function create_level_card(level) {
+  const card = document.createElement("div");
+  card.className = "level-card";
+  card.dataset.levelId = level.id;
+  if (state.current_level_id === level.id) {
+    card.classList.add("current");
+  }
+  if (load_selected_level_id === level.id) {
+    card.classList.add("keyboard-selected");
+  }
+  const preview = create_level_preview(level);
+  card.appendChild(preview);
+  const content = document.createElement("div");
+  content.className = "level-card-content";
+  const name = document.createElement("div");
+  name.className = "level-name";
+  name.textContent = level.name;
+  content.appendChild(name);
+  const meta = document.createElement("div");
+  meta.className = "level-meta";
+  meta.textContent = level_meta(level);
+  content.appendChild(meta);
+  const actions = document.createElement("div");
+  actions.className = "level-actions";
+  const load_btn = document.createElement("button");
+  load_btn.type = "button";
+  load_btn.className = "modal-btn primary";
+  load_btn.textContent = "Load";
+  load_btn.addEventListener("click", () => {
+    load_selected_level_id = level.id;
+    refresh_load_selection_ui();
+    request_level_load(level.id);
+  });
+  actions.appendChild(load_btn);
+  const rename_btn = document.createElement("button");
+  rename_btn.type = "button";
+  rename_btn.className = "modal-btn";
+  rename_btn.textContent = "Rename";
+  rename_btn.addEventListener("click", () => {
+    modal_error_text = "";
+    set_modal_state({ kind: "rename", level_id: level.id });
+  });
+  actions.appendChild(rename_btn);
+  const delete_btn = document.createElement("button");
+  delete_btn.type = "button";
+  delete_btn.className = "modal-btn danger";
+  delete_btn.textContent = "Delete";
+  delete_btn.addEventListener("click", () => {
+    modal_error_text = "";
+    set_modal_state({ kind: "confirm-delete", level_id: level.id });
+  });
+  actions.appendChild(delete_btn);
+  content.appendChild(actions);
+  card.appendChild(content);
+  card.addEventListener("click", (ev) => {
+    const target = ev.target;
+    if (target?.closest(".modal-btn")) {
+      return;
+    }
+    load_selected_level_id = level.id;
+    refresh_load_selection_ui();
+  });
+  return card;
+}
+function render_save_modal() {
+  if (state.modal_state.kind !== "save") {
+    return;
+  }
+  const save_mode = state.modal_state.mode;
+  const is_save_as = save_mode === "save-as";
+  set_modal_title(refs, is_save_as ? "Save As New" : "Save Level");
+  refs.modal_body.innerHTML = `
+    <form id="save-form" class="modal-form">
+      <label class="modal-field-label" for="save-level-name">Level Name</label>
+      <input id="save-level-name" class="modal-input" type="text" maxlength="80" />
+      <p id="save-help" class="modal-help"></p>
+      <div class="modal-actions">
+        <button id="save-cancel" class="modal-btn" type="button">Cancel</button>
+        <button class="modal-btn primary" type="submit">${is_save_as ? "Save As" : "Save"}</button>
+      </div>
+    </form>
+  `;
+  const form = refs.modal_body.querySelector("#save-form");
+  const name_input = refs.modal_body.querySelector("#save-level-name");
+  const help_el = refs.modal_body.querySelector("#save-help");
+  const cancel_btn = refs.modal_body.querySelector("#save-cancel");
+  const base_help = is_save_as ? "Save As creates a new local level, keeping the current one." : "Save will update the current level when it already exists.";
+  help_el.textContent = modal_error_text || base_help;
+  help_el.classList.toggle("error", !!modal_error_text);
+  name_input.value = state.current_level_name || "";
+  name_input.focus();
+  name_input.select();
+  cancel_btn.addEventListener("click", () => close_modal());
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    save_current_level(name_input.value, save_mode);
+  });
+}
+function render_load_modal() {
+  set_modal_title(refs, "Load Level");
+  refs.modal_body.innerHTML = `
+    <div class="library-toolbar">
+      <input id="library-search" class="library-search" type="text" placeholder="Search level name..." />
+      <div class="sort-segment" role="tablist" aria-label="Sort levels">
+        <button id="sort-recent" class="sort-segment-btn" type="button">Recent</button>
+        <button id="sort-name" class="sort-segment-btn" type="button">A-Z</button>
+      </div>
+    </div>
+    <div id="load-error" class="modal-error"></div>
+    <div id="level-grid" class="level-grid"></div>
+  `;
+  const search = refs.modal_body.querySelector("#library-search");
+  const sort_recent2 = refs.modal_body.querySelector("#sort-recent");
+  const sort_name = refs.modal_body.querySelector("#sort-name");
+  const error_el = refs.modal_body.querySelector("#load-error");
+  const grid = refs.modal_body.querySelector("#level-grid");
+  search.value = level_search_query;
+  error_el.textContent = modal_error_text;
+  sort_recent2.classList.toggle("active", state.level_sort_mode === "recent");
+  sort_name.classList.toggle("active", state.level_sort_mode === "name");
+  let levels = [];
+  try {
+    levels = search_levels(level_search_query);
+  } catch (err) {
+    error_el.textContent = `Storage error: ${String(err)}`;
+  }
+  levels = sorted_levels(levels);
+  ensure_load_selection(levels);
+  grid.innerHTML = "";
+  if (levels.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "level-empty";
+    empty.textContent = level_search_query ? "No saved levels match this search." : "No saved levels yet.";
+    grid.appendChild(empty);
+  } else {
+    for (const level of levels) {
+      grid.appendChild(create_level_card(level));
+    }
+    refresh_load_selection_ui();
+  }
+  search.addEventListener("input", () => {
+    level_search_query = search.value;
+    render_load_modal();
+  });
+  sort_recent2.addEventListener("click", () => {
+    state.level_sort_mode = "recent";
+    render_load_modal();
+  });
+  sort_name.addEventListener("click", () => {
+    state.level_sort_mode = "name";
+    render_load_modal();
+  });
+}
+function toggle_load_sort(direction) {
+  const order = ["recent", "name"];
+  const current_index = order.indexOf(state.level_sort_mode);
+  const delta = direction === "forward" ? 1 : -1;
+  const next_index = (current_index + delta + order.length) % order.length;
+  state.level_sort_mode = order[next_index];
+  render_load_modal();
+}
+function load_search_is_focused() {
+  if (state.modal_state.kind !== "load") {
+    return false;
+  }
+  const search = refs.modal_body.querySelector("#library-search");
+  return document.activeElement === search;
+}
+function move_load_selection(direction) {
+  if (state.modal_state.kind !== "load") {
+    return;
+  }
+  const cards = get_load_cards();
+  if (cards.length === 0) {
+    load_selected_level_id = null;
+    return;
+  }
+  const rows = [];
+  const row_tops = [];
+  const tolerance_px = 4;
+  for (const card of cards) {
+    const id = card.dataset.levelId;
+    if (!id)
+      continue;
+    const top = card.offsetTop;
+    const left = card.offsetLeft;
+    let row_index = -1;
+    for (let i = 0;i < row_tops.length; i++) {
+      if (Math.abs(row_tops[i] - top) <= tolerance_px) {
+        row_index = i;
+        break;
+      }
+    }
+    if (row_index < 0) {
+      row_index = rows.length;
+      row_tops.push(top);
+      rows.push([]);
+    }
+    rows[row_index].push({ id, card, left });
+  }
+  for (const row of rows) {
+    row.sort((a, b) => a.left - b.left);
+  }
+  let current_row_index = 0;
+  let current_col_index = 0;
+  if (load_selected_level_id) {
+    for (let r = 0;r < rows.length; r++) {
+      const c = rows[r].findIndex((item) => item.id === load_selected_level_id);
+      if (c >= 0) {
+        current_row_index = r;
+        current_col_index = c;
+        break;
+      }
+    }
+  }
+  let next_row_index = current_row_index;
+  let next_col_index = current_col_index;
+  if (direction === "left") {
+    next_col_index = Math.max(0, current_col_index - 1);
+  } else if (direction === "right") {
+    next_col_index = Math.min(rows[current_row_index].length - 1, current_col_index + 1);
+  } else {
+    const target_row_index = direction === "up" ? Math.max(0, current_row_index - 1) : Math.min(rows.length - 1, current_row_index + 1);
+    const current_left = rows[current_row_index][current_col_index].left;
+    let best_col_index = 0;
+    let best_distance = Number.POSITIVE_INFINITY;
+    for (let i = 0;i < rows[target_row_index].length; i++) {
+      const distance = Math.abs(rows[target_row_index][i].left - current_left);
+      if (distance < best_distance) {
+        best_distance = distance;
+        best_col_index = i;
+      }
+    }
+    next_row_index = target_row_index;
+    next_col_index = best_col_index;
+  }
+  const next = rows[next_row_index]?.[next_col_index];
+  if (!next) {
+    return;
+  }
+  load_selected_level_id = next.id;
+  refresh_load_selection_ui(true);
+}
+function activate_selected_load_level() {
+  if (state.modal_state.kind !== "load" || !load_selected_level_id) {
+    return;
+  }
+  request_level_load(load_selected_level_id);
+}
+function render_rename_modal(level_id) {
+  const level = find_level(level_id);
+  if (!level) {
+    modal_error_text = "Level no longer exists.";
+    set_modal_state({ kind: "load" });
+    return;
+  }
+  set_modal_title(refs, "Rename Level");
+  refs.modal_body.innerHTML = `
+    <form id="rename-form" class="modal-form">
+      <label class="modal-field-label" for="rename-level-name">New Name</label>
+      <input id="rename-level-name" class="modal-input" type="text" maxlength="80" />
+      <div id="rename-error" class="modal-error"></div>
+      <div class="modal-actions">
+        <button id="rename-cancel" class="modal-btn" type="button">Back</button>
+        <button class="modal-btn primary" type="submit">Rename</button>
+      </div>
+    </form>
+  `;
+  const form = refs.modal_body.querySelector("#rename-form");
+  const name_input = refs.modal_body.querySelector("#rename-level-name");
+  const error_el = refs.modal_body.querySelector("#rename-error");
+  const cancel_btn = refs.modal_body.querySelector("#rename-cancel");
+  error_el.textContent = modal_error_text;
+  name_input.value = level.name;
+  name_input.focus();
+  name_input.select();
+  cancel_btn.addEventListener("click", () => {
+    modal_error_text = "";
+    set_modal_state({ kind: "load" });
+  });
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    try {
+      const renamed = rename_level(level.id, name_input.value);
+      if (!renamed) {
+        modal_error_text = "Level not found.";
+        render_rename_modal(level_id);
+        return;
+      }
+      if (state.current_level_id === renamed.id) {
+        state.current_level_name = renamed.name;
+        refresh_map_name();
+      }
+      modal_error_text = "";
+      set_modal_state({ kind: "load" });
+      refresh_status();
+    } catch (err) {
+      modal_error_text = `Rename failed: ${String(err)}`;
+      render_rename_modal(level_id);
+    }
+  });
+}
+function render_confirm_discard_modal(level_id) {
+  const level = find_level(level_id);
+  const target_name = level ? level.name : "this level";
+  set_modal_title(refs, "Discard Unsaved Changes?");
+  refs.modal_body.innerHTML = `
+    <p class="confirm-copy">
+      You have unsaved changes. Loading <strong>${escape_html(target_name)}</strong> will replace the current level.
+    </p>
+    <div class="modal-actions">
+      <button id="discard-cancel" class="modal-btn" type="button">Cancel</button>
+      <button id="discard-confirm" class="modal-btn danger" type="button">Load Anyway</button>
+    </div>
+  `;
+  const cancel_btn = refs.modal_body.querySelector("#discard-cancel");
+  const confirm_btn = refs.modal_body.querySelector("#discard-confirm");
+  cancel_btn.addEventListener("click", () => set_modal_state({ kind: "load" }));
+  confirm_btn.addEventListener("click", () => apply_level_from_library(level_id));
+}
+function render_confirm_delete_modal(level_id) {
+  const level = find_level(level_id);
+  const target_name = level ? level.name : "this level";
+  set_modal_title(refs, "Delete Level?");
+  refs.modal_body.innerHTML = `
+    <p class="confirm-copy">
+      Delete <strong>${escape_html(target_name)}</strong> from local storage?
+      This action cannot be undone.
+    </p>
+    <div class="modal-actions">
+      <button id="delete-cancel" class="modal-btn" type="button">Cancel</button>
+      <button id="delete-confirm" class="modal-btn danger" type="button">Delete</button>
+    </div>
+  `;
+  const cancel_btn = refs.modal_body.querySelector("#delete-cancel");
+  const confirm_btn = refs.modal_body.querySelector("#delete-confirm");
+  cancel_btn.addEventListener("click", () => set_modal_state({ kind: "load" }));
+  confirm_btn.addEventListener("click", () => {
+    try {
+      const deleted = delete_level(level_id);
+      if (!deleted) {
+        modal_error_text = "Level not found.";
+        set_modal_state({ kind: "load" });
+        return;
+      }
+      if (state.current_level_id === level_id) {
+        state.current_level_id = null;
+        state.current_level_name = null;
+        state.last_persisted_raw = "";
+        state.is_dirty = true;
+        refresh_map_name();
+        refresh_status();
+      }
+      modal_error_text = "";
+      set_modal_state({ kind: "load" });
+    } catch (err) {
+      modal_error_text = `Delete failed: ${String(err)}`;
+      set_modal_state({ kind: "load" });
+    }
+  });
+}
+function render_modal() {
+  const kind = state.modal_state.kind;
+  if (kind === "none") {
+    set_modal_open(refs, false);
+    set_modal_close_visible(refs, true);
+    refs.modal_body.innerHTML = "";
+    refs.modal_title.textContent = "";
+    refs.modal_window.className = "modal-window";
+    return;
+  }
+  set_modal_open(refs, true);
+  const hide_close = kind === "save";
+  set_modal_close_visible(refs, !hide_close);
+  refs.modal_window.className = [
+    "modal-window",
+    `modal-kind-${kind}`,
+    hide_close ? "hide-header-close" : ""
+  ].filter(Boolean).join(" ");
+  switch (kind) {
+    case "save":
+      render_save_modal();
+      return;
+    case "load":
+      render_load_modal();
+      return;
+    case "rename":
+      render_rename_modal(state.modal_state.level_id);
+      return;
+    case "confirm-discard":
+      render_confirm_discard_modal(state.modal_state.level_id);
+      return;
+    case "confirm-delete":
+      render_confirm_delete_modal(state.modal_state.level_id);
+      return;
+    default:
+      return;
+  }
+}
+function toggle_sync_view() {
+  state.sync_view.enabled = !state.sync_view.enabled;
+  set_sync_view_ui(refs, state.sync_view.enabled);
+  refresh_status();
+}
+function modal_is_open() {
+  return state.modal_state.kind !== "none";
+}
+function is_text_entry_target(target) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 }
 function set_mode(mode) {
   if (mode === state.mode) {
@@ -1774,6 +2780,9 @@ function on_visual_pointer_up(ev) {
   sync_grid_and_views();
 }
 function bind_events() {
+  refs.action_save_btn.addEventListener("click", () => request_save_action());
+  refs.action_save_as_btn.addEventListener("click", () => request_save_as_action());
+  refs.action_load_btn.addEventListener("click", () => open_load_modal(true));
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
   refs.mode_visual_btn.addEventListener("click", () => set_mode("visual"));
   refs.sync_view_toggle.addEventListener("change", () => {
@@ -1781,6 +2790,8 @@ function bind_events() {
     set_sync_view_ui(refs, state.sync_view.enabled);
     refresh_status();
   });
+  refs.modal_close_btn.addEventListener("click", () => close_modal());
+  refs.modal_backdrop.addEventListener("click", () => close_modal());
   refs.tool_move_btn.addEventListener("click", () => set_tool("move"));
   refs.tool_paint_btn.addEventListener("click", () => set_tool("paint"));
   refs.tool_rubber_btn.addEventListener("click", () => set_tool("rubber"));
@@ -1799,6 +2810,7 @@ function bind_events() {
       if (!state.raw_error) {
         rebuild_visual();
       }
+      update_dirty_flag();
       refresh_status();
     }, raw_debounce_ms);
   });
@@ -1840,6 +2852,13 @@ function bind_events() {
     visual.set_transform(state.viewport);
   });
   window.addEventListener("keydown", (ev) => {
+    const in_text_entry = is_text_entry_target(ev.target);
+    if (in_text_entry || modal_is_open()) {
+      if (ev.key === "Control" || ev.key === "Meta") {
+        refs.visual_stage.classList.add("is-zoom-key");
+      }
+      return;
+    }
     if (ev.key === " ") {
       is_space_down = true;
       refresh_interaction_ui();
@@ -1853,6 +2872,12 @@ function bind_events() {
     }
   });
   window.addEventListener("keyup", (ev) => {
+    if (is_text_entry_target(ev.target) || modal_is_open()) {
+      if (ev.key === "Control" || ev.key === "Meta") {
+        refs.visual_stage.classList.remove("is-zoom-key");
+      }
+      return;
+    }
     if (ev.key === " ") {
       is_space_down = false;
       refresh_interaction_ui();
@@ -1862,16 +2887,51 @@ function bind_events() {
     }
   });
   bind_shortcuts({
-    set_tool,
-    navigate_glyphs,
-    select_highlighted_glyph,
-    dismiss: dismiss_search,
+    get_context: () => ({
+      modal_kind: state.modal_state.kind,
+      in_text_entry: is_text_entry_target(document.activeElement),
+      load_search_focused: load_search_is_focused()
+    }),
+    system_save: () => {
+      request_save_action();
+    },
+    system_save_as: () => {
+      request_save_as_action();
+    },
+    system_load: () => {
+      open_load_modal(true);
+    },
+    set_tool: (tool) => {
+      set_tool(tool);
+    },
+    navigate_glyphs: (direction) => {
+      navigate_glyphs(direction);
+    },
+    select_highlighted_glyph: () => {
+      select_highlighted_glyph();
+    },
+    dismiss: () => {
+      if (modal_is_open()) {
+        close_modal();
+        return;
+      }
+      dismiss_search();
+    },
     focus_glyph_search: () => refs.sprite_search.focus(),
-    toggle_viewport: () => set_mode(state.mode === "raw" ? "visual" : "raw"),
+    toggle_viewport: () => {
+      set_mode(state.mode === "raw" ? "visual" : "raw");
+    },
     toggle_sync_view: () => {
-      state.sync_view.enabled = !state.sync_view.enabled;
-      set_sync_view_ui(refs, state.sync_view.enabled);
-      refresh_status();
+      toggle_sync_view();
+    },
+    load_toggle_sort: (direction) => {
+      toggle_load_sort(direction);
+    },
+    load_move_selection: (direction) => {
+      move_load_selection(direction);
+    },
+    load_activate_selection: () => {
+      activate_selected_load_level();
     }
   });
 }
@@ -1893,12 +2953,18 @@ async function init_tokens() {
   }
   rebuild_visual();
   refresh_interaction_ui();
+  if (modal_is_open()) {
+    render_modal();
+  }
 }
 function bootstrap() {
   refs.raw_textarea.value = state.raw_text;
   set_mode_ui(refs, state.mode);
   set_sync_view_ui(refs, state.sync_view.enabled);
   set_tool_ui(refs, state.tool);
+  set_modal_open(refs, false);
+  set_modal_close_visible(refs, true);
+  refresh_map_name();
   set_raw_error(refs, null);
   rebuild_visual();
   bind_events();

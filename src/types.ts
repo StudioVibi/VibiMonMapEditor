@@ -38,6 +38,27 @@ export interface SyncViewState {
   enabled: boolean;
 }
 
+export interface PersistedLevel {
+  id: string;
+  name: string;
+  raw_text: string;
+  grid_width: number;
+  grid_height: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type LevelSortMode = "recent" | "name";
+export type SaveModalMode = "regular" | "save-as";
+
+export type ModalState =
+  | { kind: "none" }
+  | { kind: "save"; mode: SaveModalMode }
+  | { kind: "load" }
+  | { kind: "rename"; level_id: string }
+  | { kind: "confirm-discard"; level_id: string }
+  | { kind: "confirm-delete"; level_id: string };
+
 export interface SelectionRect {
   x: number;
   y: number;
@@ -64,6 +85,12 @@ export interface EditorState {
   tool: Tool;
   selected_token_key: string | null;
   selected_token: GlyphToken | null;
+  current_level_id: string | null;
+  current_level_name: string | null;
+  last_persisted_raw: string;
+  is_dirty: boolean;
+  level_sort_mode: LevelSortMode;
+  modal_state: ModalState;
   viewport: ViewportState;
   shared_camera: SharedCameraState;
   raw_viewport: RawViewportState;

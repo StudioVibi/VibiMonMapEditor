@@ -2,15 +2,25 @@ import * as Dom from "./dom";
 import * as Cam from "./camera-sync";
 import * as Cat from "./glyph-catalog";
 import * as Shortcuts from "./keyboard-shortcuts";
+import * as Store from "./level-storage";
+import * as Raw from "./raw-format";
 import * as St from "./state";
 import * as Tools from "./tools";
 import type * as T from "./types";
-import { DEFAULT_FLOOR_ASSET, VIBIMON_ASSET_ROOT } from "./vibimon-resolver";
+import { DEFAULT_FLOOR_ASSET, VIBIMON_ASSET_ROOT, resolve_cell_visual } from "./vibimon-resolver";
 import * as Visual from "./visual-render";
 
 const raw_debounce_ms = 180;
 const raw_font_min_px = 8;
 const raw_font_max_px = 96;
+const preview_tile_size = 12;
+const preview_frame_width = 300;
+const preview_frame_height = 144;
+
+const date_formatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short"
+});
 
 const root = document.querySelector("#app");
 if (!root) {
@@ -31,6 +41,11 @@ let raw_timer: number | null = null;
 let is_space_down = false;
 let highlighted_glyph_index = -1;
 let filtered_tokens: T.GlyphToken[] = [];
+let level_search_query = "";
+let load_selected_level_id: string | null = null;
+let modal_error_text = "";
+let status_flash_text: string | null = null;
+let status_flash_timer: number | null = null;
 
 let pointer_drag:
   | null
@@ -130,17 +145,50 @@ function preview_asset(token: T.GlyphToken): string {
 }
 
 function refresh_status(): void {
-  const picked = state.selected_token
-    ? `${state.selected_token.token} ${state.selected_token.name}`
-    : "none";
-  const text = [
+  if (status_flash_text) {
+    Dom.set_status_html(refs, `<span class="status-success">${escape_html(status_flash_text)}</span>`);
+    return;
+  }
+
+  let level_html = `<span class="status-unsaved">(unsaved)</span>`;
+  if (state.current_level_name) {
+    level_html = state.is_dirty
+      ? `${escape_html(state.current_level_name)} <span class="status-unsaved">(unsaved)</span>`
+      : escape_html(state.current_level_name);
+  }
+
+  const segments = [
+    `Level: ${level_html}`,
     `Mode: ${state.mode.toUpperCase()}`,
     `Sync: ${state.sync_view.enabled ? "ON" : "OFF"}`,
     `Tool: ${state.tool}`,
-    `Grid: ${state.grid.width}x${state.grid.height}`,
-    `Glyph: ${picked}`
-  ].join(" | ");
-  Dom.set_status(refs, text);
+    `Grid: ${state.grid.width}x${state.grid.height}`
+  ];
+  const html = segments
+    .map((segment, idx) => (idx === 0 ? segment : escape_html(segment)))
+    .join(' <span class="status-sep">|</span> ');
+  Dom.set_status_html(refs, html);
+}
+
+function flash_status(text: string, duration_ms = 2000): void {
+  status_flash_text = text;
+  if (status_flash_timer !== null) {
+    window.clearTimeout(status_flash_timer);
+  }
+  Dom.set_status_html(refs, `<span class="status-success">${escape_html(text)}</span>`);
+  status_flash_timer = window.setTimeout(() => {
+    status_flash_text = null;
+    status_flash_timer = null;
+    refresh_status();
+  }, duration_ms);
+}
+
+function refresh_map_name(): void {
+  Dom.set_map_name(refs, state.current_level_name);
+}
+
+function update_dirty_flag(): void {
+  state.is_dirty = state.raw_text !== state.last_persisted_raw;
 }
 
 function refresh_interaction_ui(): void {
@@ -179,6 +227,7 @@ function rebuild_visual(): void {
 function sync_grid_and_views(): void {
   visual.refresh_grid(state.grid, token_by_key);
   St.sync_raw_from_grid(state);
+  update_dirty_flag();
   if (state.mode === "raw") {
     refs.raw_textarea.value = state.raw_text;
   }
@@ -273,6 +322,747 @@ function apply_camera_to_raw(): void {
   refs.raw_textarea.scrollTop = scroll.top;
   state.raw_viewport = Cam.measure_raw_metrics(refs.raw_textarea);
   focus_raw_tile_from_camera();
+}
+
+function escape_html(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function sorted_levels(levels: T.PersistedLevel[]): T.PersistedLevel[] {
+  if (state.level_sort_mode === "name") {
+    return [...levels].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }
+  return [...levels].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+}
+
+function set_modal_state(next: T.ModalState): void {
+  state.modal_state = next;
+  render_modal();
+}
+
+function close_modal(): void {
+  modal_error_text = "";
+  set_modal_state({ kind: "none" });
+}
+
+function open_save_modal(mode: T.SaveModalMode, error_text = ""): void {
+  modal_error_text = error_text;
+  set_modal_state({ kind: "save", mode });
+}
+
+function open_load_modal(reset_search = true): void {
+  if (reset_search) {
+    level_search_query = "";
+  }
+  if (state.modal_state.kind !== "load") {
+    load_selected_level_id = state.current_level_id;
+  }
+  modal_error_text = "";
+  set_modal_state({ kind: "load" });
+}
+
+function set_saved_level_state(level: T.PersistedLevel): void {
+  state.current_level_id = level.id;
+  state.current_level_name = level.name;
+  state.last_persisted_raw = state.raw_text;
+  update_dirty_flag();
+  refresh_map_name();
+  refresh_status();
+}
+
+function persist_level(name: string, id: string | null): T.PersistedLevel {
+  const parsed = Raw.parse_raw(state.raw_text);
+  const width = parsed.ok ? parsed.grid.width : state.grid.width;
+  const height = parsed.ok ? parsed.grid.height : state.grid.height;
+  return Store.save_level({
+    id,
+    name,
+    raw_text: state.raw_text,
+    grid_width: width,
+    grid_height: height
+  });
+}
+
+function save_current_level(name: string, mode: T.SaveModalMode): void {
+  try {
+    const target_id = mode === "save-as" ? null : state.current_level_id;
+    const saved = persist_level(name, target_id);
+    set_saved_level_state(saved);
+    close_modal();
+    const prefix = mode === "save-as" ? "Saved as" : "Saved";
+    flash_status(`${prefix}: ${saved.name}`);
+  } catch (err) {
+    modal_error_text = `Save failed: ${String(err)}`;
+    render_modal();
+  }
+}
+
+function quick_save_current_level(): void {
+  if (!state.current_level_id || !state.current_level_name) {
+    open_save_modal("regular");
+    return;
+  }
+
+  try {
+    const saved = persist_level(state.current_level_name, state.current_level_id);
+    set_saved_level_state(saved);
+    flash_status(`Saved: ${saved.name}`);
+  } catch (err) {
+    open_save_modal("regular", `Save failed: ${String(err)}`);
+  }
+}
+
+function request_save_action(): void {
+  if (state.current_level_id) {
+    quick_save_current_level();
+    return;
+  }
+  open_save_modal("regular");
+}
+
+function request_save_as_action(): void {
+  open_save_modal("save-as");
+}
+
+function find_level(level_id: string): T.PersistedLevel | null {
+  try {
+    return Store.get_level(level_id);
+  } catch {
+    return null;
+  }
+}
+
+function apply_level_from_library(level_id: string): void {
+  const level = find_level(level_id);
+  if (!level) {
+    modal_error_text = "Level not found in local storage.";
+    render_modal();
+    return;
+  }
+
+  const parsed = Raw.parse_raw(level.raw_text);
+  if (!parsed.ok) {
+    modal_error_text = `Could not load this level: ${parsed.error}`;
+    render_modal();
+    return;
+  }
+
+  state.raw_text = level.raw_text;
+  state.grid = parsed.grid;
+  state.last_valid_grid = Raw.clone_grid(parsed.grid);
+  state.raw_error = null;
+  state.move_selection = null;
+  refs.raw_textarea.value = state.raw_text;
+  Dom.set_raw_error(refs, null);
+  rebuild_visual();
+
+  state.current_level_id = level.id;
+  state.current_level_name = level.name;
+  state.last_persisted_raw = state.raw_text;
+  update_dirty_flag();
+  refresh_map_name();
+  refresh_status();
+
+  if (state.mode === "raw") {
+    refs.raw_textarea.focus();
+  }
+  close_modal();
+}
+
+function request_level_load(level_id: string): void {
+  if (state.is_dirty && state.current_level_id !== level_id) {
+    modal_error_text = "";
+    set_modal_state({ kind: "confirm-discard", level_id });
+    return;
+  }
+  apply_level_from_library(level_id);
+}
+
+function preview_img(src: string, fallback_to_floor: boolean): HTMLImageElement {
+  const img = document.createElement("img");
+  img.alt = "";
+  img.draggable = false;
+  img.loading = "lazy";
+  img.onerror = () => {
+    if (fallback_to_floor && img.dataset.fallbackApplied !== "1") {
+      img.dataset.fallbackApplied = "1";
+      img.src = DEFAULT_FLOOR_ASSET;
+      return;
+    }
+    img.style.display = "none";
+  };
+  img.dataset.fallbackApplied = "0";
+  img.src = src;
+  return img;
+}
+
+function create_level_preview(level: T.PersistedLevel): HTMLDivElement {
+  const frame = document.createElement("div");
+  frame.className = "level-preview-frame";
+
+  const parsed = Raw.parse_raw(level.raw_text);
+  if (!parsed.ok) {
+    const invalid = document.createElement("div");
+    invalid.className = "level-preview-invalid";
+    invalid.textContent = "Invalid RAW";
+    frame.appendChild(invalid);
+    return frame;
+  }
+
+  const grid = parsed.grid;
+  const world = document.createElement("div");
+  world.className = "level-preview-world";
+  const world_w = grid.width * preview_tile_size;
+  const world_h = grid.height * preview_tile_size;
+  const scale = Math.min((preview_frame_width - 8) / world_w, (preview_frame_height - 8) / world_h, 1);
+  const offset_x = (preview_frame_width - world_w * scale) / 2;
+  const offset_y = (preview_frame_height - world_h * scale) / 2;
+  world.style.width = `${world_w}px`;
+  world.style.height = `${world_h}px`;
+  world.style.transform = `translate(${offset_x}px, ${offset_y}px) scale(${scale})`;
+
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      const data = resolve_cell_visual(grid, x, y, token_by_key);
+      const tile = document.createElement("div");
+      tile.className = "level-preview-tile";
+      tile.style.left = `${x * preview_tile_size}px`;
+      tile.style.top = `${y * preview_tile_size}px`;
+      tile.style.width = `${preview_tile_size}px`;
+      tile.style.height = `${preview_tile_size}px`;
+
+      if (data.floor_asset) {
+        const floor = preview_img(data.floor_asset, true);
+        floor.className = "level-preview-floor";
+        tile.appendChild(floor);
+      }
+
+      if (data.entity_asset) {
+        const ent = preview_img(data.entity_asset, false);
+        ent.className = "level-preview-entity";
+        tile.appendChild(ent);
+      }
+
+      world.appendChild(tile);
+    }
+  }
+
+  frame.appendChild(world);
+  return frame;
+}
+
+function level_meta(level: T.PersistedLevel): string {
+  const updated = Date.parse(level.updated_at);
+  const when = Number.isFinite(updated) ? date_formatter.format(new Date(updated)) : level.updated_at;
+  return `${level.grid_width}x${level.grid_height} • ${when}`;
+}
+
+function get_load_cards(): HTMLDivElement[] {
+  if (state.modal_state.kind !== "load") {
+    return [];
+  }
+  return Array.from(refs.modal_body.querySelectorAll<HTMLDivElement>(".level-card[data-level-id]"));
+}
+
+function refresh_load_selection_ui(scroll = false): void {
+  const cards = get_load_cards();
+  for (const card of cards) {
+    card.classList.toggle("keyboard-selected", card.dataset.levelId === load_selected_level_id);
+  }
+
+  if (!scroll || !load_selected_level_id) {
+    return;
+  }
+  const selected = cards.find((card) => card.dataset.levelId === load_selected_level_id);
+  selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+function ensure_load_selection(levels: T.PersistedLevel[]): void {
+  if (levels.length === 0) {
+    load_selected_level_id = null;
+    return;
+  }
+
+  const ids = new Set(levels.map((level) => level.id));
+  if (load_selected_level_id && ids.has(load_selected_level_id)) {
+    return;
+  }
+
+  if (state.current_level_id && ids.has(state.current_level_id)) {
+    load_selected_level_id = state.current_level_id;
+    return;
+  }
+
+  load_selected_level_id = levels[0].id;
+}
+
+function create_level_card(level: T.PersistedLevel): HTMLDivElement {
+  const card = document.createElement("div");
+  card.className = "level-card";
+  card.dataset.levelId = level.id;
+  if (state.current_level_id === level.id) {
+    card.classList.add("current");
+  }
+  if (load_selected_level_id === level.id) {
+    card.classList.add("keyboard-selected");
+  }
+
+  const preview = create_level_preview(level);
+  card.appendChild(preview);
+
+  const content = document.createElement("div");
+  content.className = "level-card-content";
+
+  const name = document.createElement("div");
+  name.className = "level-name";
+  name.textContent = level.name;
+  content.appendChild(name);
+
+  const meta = document.createElement("div");
+  meta.className = "level-meta";
+  meta.textContent = level_meta(level);
+  content.appendChild(meta);
+
+  const actions = document.createElement("div");
+  actions.className = "level-actions";
+
+  const load_btn = document.createElement("button");
+  load_btn.type = "button";
+  load_btn.className = "modal-btn primary";
+  load_btn.textContent = "Load";
+  load_btn.addEventListener("click", () => {
+    load_selected_level_id = level.id;
+    refresh_load_selection_ui();
+    request_level_load(level.id);
+  });
+  actions.appendChild(load_btn);
+
+  const rename_btn = document.createElement("button");
+  rename_btn.type = "button";
+  rename_btn.className = "modal-btn";
+  rename_btn.textContent = "Rename";
+  rename_btn.addEventListener("click", () => {
+    modal_error_text = "";
+    set_modal_state({ kind: "rename", level_id: level.id });
+  });
+  actions.appendChild(rename_btn);
+
+  const delete_btn = document.createElement("button");
+  delete_btn.type = "button";
+  delete_btn.className = "modal-btn danger";
+  delete_btn.textContent = "Delete";
+  delete_btn.addEventListener("click", () => {
+    modal_error_text = "";
+    set_modal_state({ kind: "confirm-delete", level_id: level.id });
+  });
+  actions.appendChild(delete_btn);
+
+  content.appendChild(actions);
+  card.appendChild(content);
+
+  card.addEventListener("click", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    if (target?.closest(".modal-btn")) {
+      return;
+    }
+    load_selected_level_id = level.id;
+    refresh_load_selection_ui();
+  });
+
+  return card;
+}
+
+function render_save_modal(): void {
+  if (state.modal_state.kind !== "save") {
+    return;
+  }
+
+  const save_mode = state.modal_state.mode;
+  const is_save_as = save_mode === "save-as";
+  Dom.set_modal_title(refs, is_save_as ? "Save As New" : "Save Level");
+  refs.modal_body.innerHTML = `
+    <form id="save-form" class="modal-form">
+      <label class="modal-field-label" for="save-level-name">Level Name</label>
+      <input id="save-level-name" class="modal-input" type="text" maxlength="80" />
+      <p id="save-help" class="modal-help"></p>
+      <div class="modal-actions">
+        <button id="save-cancel" class="modal-btn" type="button">Cancel</button>
+        <button class="modal-btn primary" type="submit">${is_save_as ? "Save As" : "Save"}</button>
+      </div>
+    </form>
+  `;
+
+  const form = refs.modal_body.querySelector("#save-form") as HTMLFormElement;
+  const name_input = refs.modal_body.querySelector("#save-level-name") as HTMLInputElement;
+  const help_el = refs.modal_body.querySelector("#save-help") as HTMLParagraphElement;
+  const cancel_btn = refs.modal_body.querySelector("#save-cancel") as HTMLButtonElement;
+  const base_help = is_save_as
+    ? "Save As creates a new local level, keeping the current one."
+    : "Save will update the current level when it already exists.";
+  help_el.textContent = modal_error_text || base_help;
+  help_el.classList.toggle("error", !!modal_error_text);
+  name_input.value = state.current_level_name || "";
+  name_input.focus();
+  name_input.select();
+
+  cancel_btn.addEventListener("click", () => close_modal());
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    save_current_level(name_input.value, save_mode);
+  });
+}
+
+function render_load_modal(): void {
+  Dom.set_modal_title(refs, "Load Level");
+  refs.modal_body.innerHTML = `
+    <div class="library-toolbar">
+      <input id="library-search" class="library-search" type="text" placeholder="Search level name..." />
+      <div class="sort-segment" role="tablist" aria-label="Sort levels">
+        <button id="sort-recent" class="sort-segment-btn" type="button">Recent</button>
+        <button id="sort-name" class="sort-segment-btn" type="button">A-Z</button>
+      </div>
+    </div>
+    <div id="load-error" class="modal-error"></div>
+    <div id="level-grid" class="level-grid"></div>
+  `;
+
+  const search = refs.modal_body.querySelector("#library-search") as HTMLInputElement;
+  const sort_recent = refs.modal_body.querySelector("#sort-recent") as HTMLButtonElement;
+  const sort_name = refs.modal_body.querySelector("#sort-name") as HTMLButtonElement;
+  const error_el = refs.modal_body.querySelector("#load-error") as HTMLDivElement;
+  const grid = refs.modal_body.querySelector("#level-grid") as HTMLDivElement;
+
+  search.value = level_search_query;
+  error_el.textContent = modal_error_text;
+  sort_recent.classList.toggle("active", state.level_sort_mode === "recent");
+  sort_name.classList.toggle("active", state.level_sort_mode === "name");
+
+  let levels: T.PersistedLevel[] = [];
+  try {
+    levels = Store.search_levels(level_search_query);
+  } catch (err) {
+    error_el.textContent = `Storage error: ${String(err)}`;
+  }
+  levels = sorted_levels(levels);
+  ensure_load_selection(levels);
+
+  grid.innerHTML = "";
+  if (levels.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "level-empty";
+    empty.textContent = level_search_query
+      ? "No saved levels match this search."
+      : "No saved levels yet.";
+    grid.appendChild(empty);
+  } else {
+    for (const level of levels) {
+      grid.appendChild(create_level_card(level));
+    }
+    refresh_load_selection_ui();
+  }
+
+  search.addEventListener("input", () => {
+    level_search_query = search.value;
+    render_load_modal();
+  });
+  sort_recent.addEventListener("click", () => {
+    state.level_sort_mode = "recent";
+    render_load_modal();
+  });
+  sort_name.addEventListener("click", () => {
+    state.level_sort_mode = "name";
+    render_load_modal();
+  });
+}
+
+function toggle_load_sort(direction: "forward" | "backward"): void {
+  const order: T.LevelSortMode[] = ["recent", "name"];
+  const current_index = order.indexOf(state.level_sort_mode);
+  const delta = direction === "forward" ? 1 : -1;
+  const next_index = (current_index + delta + order.length) % order.length;
+  state.level_sort_mode = order[next_index];
+  render_load_modal();
+}
+
+function load_search_is_focused(): boolean {
+  if (state.modal_state.kind !== "load") {
+    return false;
+  }
+  const search = refs.modal_body.querySelector("#library-search");
+  return document.activeElement === search;
+}
+
+function move_load_selection(direction: "left" | "right" | "up" | "down"): void {
+  if (state.modal_state.kind !== "load") {
+    return;
+  }
+
+  const cards = get_load_cards();
+  if (cards.length === 0) {
+    load_selected_level_id = null;
+    return;
+  }
+
+  type RowItem = { id: string; card: HTMLDivElement; left: number };
+  const rows: RowItem[][] = [];
+  const row_tops: number[] = [];
+  const tolerance_px = 4;
+
+  for (const card of cards) {
+    const id = card.dataset.levelId;
+    if (!id) continue;
+    const top = card.offsetTop;
+    const left = card.offsetLeft;
+    let row_index = -1;
+    for (let i = 0; i < row_tops.length; i++) {
+      if (Math.abs(row_tops[i] - top) <= tolerance_px) {
+        row_index = i;
+        break;
+      }
+    }
+    if (row_index < 0) {
+      row_index = rows.length;
+      row_tops.push(top);
+      rows.push([]);
+    }
+    rows[row_index].push({ id, card, left });
+  }
+
+  for (const row of rows) {
+    row.sort((a, b) => a.left - b.left);
+  }
+
+  let current_row_index = 0;
+  let current_col_index = 0;
+  if (load_selected_level_id) {
+    for (let r = 0; r < rows.length; r++) {
+      const c = rows[r].findIndex((item) => item.id === load_selected_level_id);
+      if (c >= 0) {
+        current_row_index = r;
+        current_col_index = c;
+        break;
+      }
+    }
+  }
+
+  let next_row_index = current_row_index;
+  let next_col_index = current_col_index;
+
+  if (direction === "left") {
+    next_col_index = Math.max(0, current_col_index - 1);
+  } else if (direction === "right") {
+    next_col_index = Math.min(rows[current_row_index].length - 1, current_col_index + 1);
+  } else {
+    const target_row_index = direction === "up"
+      ? Math.max(0, current_row_index - 1)
+      : Math.min(rows.length - 1, current_row_index + 1);
+
+    const current_left = rows[current_row_index][current_col_index].left;
+    let best_col_index = 0;
+    let best_distance = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < rows[target_row_index].length; i++) {
+      const distance = Math.abs(rows[target_row_index][i].left - current_left);
+      if (distance < best_distance) {
+        best_distance = distance;
+        best_col_index = i;
+      }
+    }
+
+    next_row_index = target_row_index;
+    next_col_index = best_col_index;
+  }
+
+  const next = rows[next_row_index]?.[next_col_index];
+  if (!next) {
+    return;
+  }
+  load_selected_level_id = next.id;
+  refresh_load_selection_ui(true);
+}
+
+function activate_selected_load_level(): void {
+  if (state.modal_state.kind !== "load" || !load_selected_level_id) {
+    return;
+  }
+  request_level_load(load_selected_level_id);
+}
+
+function render_rename_modal(level_id: string): void {
+  const level = find_level(level_id);
+  if (!level) {
+    modal_error_text = "Level no longer exists.";
+    set_modal_state({ kind: "load" });
+    return;
+  }
+
+  Dom.set_modal_title(refs, "Rename Level");
+  refs.modal_body.innerHTML = `
+    <form id="rename-form" class="modal-form">
+      <label class="modal-field-label" for="rename-level-name">New Name</label>
+      <input id="rename-level-name" class="modal-input" type="text" maxlength="80" />
+      <div id="rename-error" class="modal-error"></div>
+      <div class="modal-actions">
+        <button id="rename-cancel" class="modal-btn" type="button">Back</button>
+        <button class="modal-btn primary" type="submit">Rename</button>
+      </div>
+    </form>
+  `;
+
+  const form = refs.modal_body.querySelector("#rename-form") as HTMLFormElement;
+  const name_input = refs.modal_body.querySelector("#rename-level-name") as HTMLInputElement;
+  const error_el = refs.modal_body.querySelector("#rename-error") as HTMLDivElement;
+  const cancel_btn = refs.modal_body.querySelector("#rename-cancel") as HTMLButtonElement;
+  error_el.textContent = modal_error_text;
+  name_input.value = level.name;
+  name_input.focus();
+  name_input.select();
+
+  cancel_btn.addEventListener("click", () => {
+    modal_error_text = "";
+    set_modal_state({ kind: "load" });
+  });
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    try {
+      const renamed = Store.rename_level(level.id, name_input.value);
+      if (!renamed) {
+        modal_error_text = "Level not found.";
+        render_rename_modal(level_id);
+        return;
+      }
+      if (state.current_level_id === renamed.id) {
+        state.current_level_name = renamed.name;
+        refresh_map_name();
+      }
+      modal_error_text = "";
+      set_modal_state({ kind: "load" });
+      refresh_status();
+    } catch (err) {
+      modal_error_text = `Rename failed: ${String(err)}`;
+      render_rename_modal(level_id);
+    }
+  });
+}
+
+function render_confirm_discard_modal(level_id: string): void {
+  const level = find_level(level_id);
+  const target_name = level ? level.name : "this level";
+  Dom.set_modal_title(refs, "Discard Unsaved Changes?");
+  refs.modal_body.innerHTML = `
+    <p class="confirm-copy">
+      You have unsaved changes. Loading <strong>${escape_html(target_name)}</strong> will replace the current level.
+    </p>
+    <div class="modal-actions">
+      <button id="discard-cancel" class="modal-btn" type="button">Cancel</button>
+      <button id="discard-confirm" class="modal-btn danger" type="button">Load Anyway</button>
+    </div>
+  `;
+
+  const cancel_btn = refs.modal_body.querySelector("#discard-cancel") as HTMLButtonElement;
+  const confirm_btn = refs.modal_body.querySelector("#discard-confirm") as HTMLButtonElement;
+  cancel_btn.addEventListener("click", () => set_modal_state({ kind: "load" }));
+  confirm_btn.addEventListener("click", () => apply_level_from_library(level_id));
+}
+
+function render_confirm_delete_modal(level_id: string): void {
+  const level = find_level(level_id);
+  const target_name = level ? level.name : "this level";
+  Dom.set_modal_title(refs, "Delete Level?");
+  refs.modal_body.innerHTML = `
+    <p class="confirm-copy">
+      Delete <strong>${escape_html(target_name)}</strong> from local storage?
+      This action cannot be undone.
+    </p>
+    <div class="modal-actions">
+      <button id="delete-cancel" class="modal-btn" type="button">Cancel</button>
+      <button id="delete-confirm" class="modal-btn danger" type="button">Delete</button>
+    </div>
+  `;
+
+  const cancel_btn = refs.modal_body.querySelector("#delete-cancel") as HTMLButtonElement;
+  const confirm_btn = refs.modal_body.querySelector("#delete-confirm") as HTMLButtonElement;
+  cancel_btn.addEventListener("click", () => set_modal_state({ kind: "load" }));
+  confirm_btn.addEventListener("click", () => {
+    try {
+      const deleted = Store.delete_level(level_id);
+      if (!deleted) {
+        modal_error_text = "Level not found.";
+        set_modal_state({ kind: "load" });
+        return;
+      }
+      if (state.current_level_id === level_id) {
+        state.current_level_id = null;
+        state.current_level_name = null;
+        state.last_persisted_raw = "";
+        state.is_dirty = true;
+        refresh_map_name();
+        refresh_status();
+      }
+      modal_error_text = "";
+      set_modal_state({ kind: "load" });
+    } catch (err) {
+      modal_error_text = `Delete failed: ${String(err)}`;
+      set_modal_state({ kind: "load" });
+    }
+  });
+}
+
+function render_modal(): void {
+  const kind = state.modal_state.kind;
+  if (kind === "none") {
+    Dom.set_modal_open(refs, false);
+    Dom.set_modal_close_visible(refs, true);
+    refs.modal_body.innerHTML = "";
+    refs.modal_title.textContent = "";
+    refs.modal_window.className = "modal-window";
+    return;
+  }
+
+  Dom.set_modal_open(refs, true);
+  const hide_close = kind === "save";
+  Dom.set_modal_close_visible(refs, !hide_close);
+  refs.modal_window.className = [
+    "modal-window",
+    `modal-kind-${kind}`,
+    hide_close ? "hide-header-close" : ""
+  ].filter(Boolean).join(" ");
+  switch (kind) {
+    case "save":
+      render_save_modal();
+      return;
+    case "load":
+      render_load_modal();
+      return;
+    case "rename":
+      render_rename_modal(state.modal_state.level_id);
+      return;
+    case "confirm-discard":
+      render_confirm_discard_modal(state.modal_state.level_id);
+      return;
+    case "confirm-delete":
+      render_confirm_delete_modal(state.modal_state.level_id);
+      return;
+    default:
+      return;
+  }
+}
+
+function toggle_sync_view(): void {
+  state.sync_view.enabled = !state.sync_view.enabled;
+  Dom.set_sync_view_ui(refs, state.sync_view.enabled);
+  refresh_status();
+}
+
+function modal_is_open(): boolean {
+  return state.modal_state.kind !== "none";
+}
+
+function is_text_entry_target(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 }
 
 function set_mode(mode: T.ViewMode): void {
@@ -794,6 +1584,9 @@ function on_visual_pointer_up(ev: PointerEvent): void {
 }
 
 function bind_events(): void {
+  refs.action_save_btn.addEventListener("click", () => request_save_action());
+  refs.action_save_as_btn.addEventListener("click", () => request_save_as_action());
+  refs.action_load_btn.addEventListener("click", () => open_load_modal(true));
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
   refs.mode_visual_btn.addEventListener("click", () => set_mode("visual"));
   refs.sync_view_toggle.addEventListener("change", () => {
@@ -801,6 +1594,8 @@ function bind_events(): void {
     Dom.set_sync_view_ui(refs, state.sync_view.enabled);
     refresh_status();
   });
+  refs.modal_close_btn.addEventListener("click", () => close_modal());
+  refs.modal_backdrop.addEventListener("click", () => close_modal());
 
   refs.tool_move_btn.addEventListener("click", () => set_tool("move"));
   refs.tool_paint_btn.addEventListener("click", () => set_tool("paint"));
@@ -822,6 +1617,7 @@ function bind_events(): void {
       if (!state.raw_error) {
         rebuild_visual();
       }
+      update_dirty_flag();
       refresh_status();
     }, raw_debounce_ms);
   });
@@ -869,6 +1665,14 @@ function bind_events(): void {
   });
 
   window.addEventListener("keydown", (ev) => {
+    const in_text_entry = is_text_entry_target(ev.target);
+    if (in_text_entry || modal_is_open()) {
+      if (ev.key === "Control" || ev.key === "Meta") {
+        refs.visual_stage.classList.add("is-zoom-key");
+      }
+      return;
+    }
+
     if (ev.key === " ") {
       is_space_down = true;
       refresh_interaction_ui();
@@ -883,6 +1687,13 @@ function bind_events(): void {
   });
 
   window.addEventListener("keyup", (ev) => {
+    if (is_text_entry_target(ev.target) || modal_is_open()) {
+      if (ev.key === "Control" || ev.key === "Meta") {
+        refs.visual_stage.classList.remove("is-zoom-key");
+      }
+      return;
+    }
+
     if (ev.key === " ") {
       is_space_down = false;
       refresh_interaction_ui();
@@ -893,17 +1704,52 @@ function bind_events(): void {
   });
 
   Shortcuts.bind_shortcuts({
-    set_tool,
-    navigate_glyphs,
-    select_highlighted_glyph,
-    dismiss: dismiss_search,
-    focus_glyph_search: () => refs.sprite_search.focus(),
-    toggle_viewport: () => set_mode(state.mode === "raw" ? "visual" : "raw"),
-    toggle_sync_view: () => {
-      state.sync_view.enabled = !state.sync_view.enabled;
-      Dom.set_sync_view_ui(refs, state.sync_view.enabled);
-      refresh_status();
+    get_context: () => ({
+      modal_kind: state.modal_state.kind,
+      in_text_entry: is_text_entry_target(document.activeElement),
+      load_search_focused: load_search_is_focused()
+    }),
+    system_save: () => {
+      request_save_action();
     },
+    system_save_as: () => {
+      request_save_as_action();
+    },
+    system_load: () => {
+      open_load_modal(true);
+    },
+    set_tool: (tool) => {
+      set_tool(tool);
+    },
+    navigate_glyphs: (direction) => {
+      navigate_glyphs(direction);
+    },
+    select_highlighted_glyph: () => {
+      select_highlighted_glyph();
+    },
+    dismiss: () => {
+      if (modal_is_open()) {
+        close_modal();
+        return;
+      }
+      dismiss_search();
+    },
+    focus_glyph_search: () => refs.sprite_search.focus(),
+    toggle_viewport: () => {
+      set_mode(state.mode === "raw" ? "visual" : "raw");
+    },
+    toggle_sync_view: () => {
+      toggle_sync_view();
+    },
+    load_toggle_sort: (direction) => {
+      toggle_load_sort(direction);
+    },
+    load_move_selection: (direction) => {
+      move_load_selection(direction);
+    },
+    load_activate_selection: () => {
+      activate_selected_load_level();
+    }
   });
 }
 
@@ -928,6 +1774,9 @@ async function init_tokens(): Promise<void> {
 
   rebuild_visual();
   refresh_interaction_ui();
+  if (modal_is_open()) {
+    render_modal();
+  }
 }
 
 function bootstrap(): void {
@@ -935,6 +1784,9 @@ function bootstrap(): void {
   Dom.set_mode_ui(refs, state.mode);
   Dom.set_sync_view_ui(refs, state.sync_view.enabled);
   Dom.set_tool_ui(refs, state.tool);
+  Dom.set_modal_open(refs, false);
+  Dom.set_modal_close_visible(refs, true);
+  refresh_map_name();
   Dom.set_raw_error(refs, null);
   rebuild_visual();
   bind_events();
