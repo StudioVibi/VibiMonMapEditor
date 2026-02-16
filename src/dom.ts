@@ -50,8 +50,8 @@ export function mount_app(root: HTMLElement): DomRefs {
           </div>
         </div>
         <div class="mode-toggle" role="tablist" aria-label="Render mode">
-          <button id="mode-raw" class="mode-btn" type="button">RAW</button>
           <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
+          <button id="mode-raw" class="mode-btn" type="button">RAW</button>
         </div>
       </header>
       <main class="main-layout">

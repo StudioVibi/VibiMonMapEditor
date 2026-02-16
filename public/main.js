@@ -17,8 +17,8 @@ function mount_app(root) {
           </div>
         </div>
         <div class="mode-toggle" role="tablist" aria-label="Render mode">
-          <button id="mode-raw" class="mode-btn" type="button">RAW</button>
           <button id="mode-visual" class="mode-btn active" type="button">VISUAL</button>
+          <button id="mode-raw" class="mode-btn" type="button">RAW</button>
         </div>
       </header>
       <main class="main-layout">
@@ -1504,6 +1504,7 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
 var raw_debounce_ms = 180;
 var raw_font_min_px = 8;
 var raw_font_max_px = 96;
+var raw_font_default_px = 13;
 var preview_tile_size = 12;
 var preview_frame_width = 300;
 var preview_frame_height = 144;
@@ -1715,6 +1716,10 @@ function apply_camera_to_raw() {
   refs.raw_textarea.scrollTop = scroll.top;
   state.raw_viewport = measure_raw_metrics(refs.raw_textarea);
   focus_raw_tile_from_camera();
+}
+function reset_raw_zoom_to_default() {
+  refs.raw_textarea.style.fontSize = `${raw_font_default_px}px`;
+  state.raw_viewport = measure_raw_metrics(refs.raw_textarea);
 }
 function escape_html(text) {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -2350,10 +2355,16 @@ function render_modal() {
       return;
   }
 }
-function toggle_sync_view() {
-  state.sync_view.enabled = !state.sync_view.enabled;
-  set_sync_view_ui(refs, state.sync_view.enabled);
+function set_sync_view_enabled(enabled) {
+  state.sync_view.enabled = enabled;
+  set_sync_view_ui(refs, enabled);
+  if (!enabled) {
+    reset_raw_zoom_to_default();
+  }
   refresh_status();
+}
+function toggle_sync_view() {
+  set_sync_view_enabled(!state.sync_view.enabled);
 }
 function modal_is_open() {
   return state.modal_state.kind !== "none";
@@ -2786,9 +2797,7 @@ function bind_events() {
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
   refs.mode_visual_btn.addEventListener("click", () => set_mode("visual"));
   refs.sync_view_toggle.addEventListener("change", () => {
-    state.sync_view.enabled = refs.sync_view_toggle.checked;
-    set_sync_view_ui(refs, state.sync_view.enabled);
-    refresh_status();
+    set_sync_view_enabled(refs.sync_view_toggle.checked);
   });
   refs.modal_close_btn.addEventListener("click", () => close_modal());
   refs.modal_backdrop.addEventListener("click", () => close_modal());

@@ -13,6 +13,7 @@ import * as Visual from "./visual-render";
 const raw_debounce_ms = 180;
 const raw_font_min_px = 8;
 const raw_font_max_px = 96;
+const raw_font_default_px = 13;
 const preview_tile_size = 12;
 const preview_frame_width = 300;
 const preview_frame_height = 144;
@@ -322,6 +323,11 @@ function apply_camera_to_raw(): void {
   refs.raw_textarea.scrollTop = scroll.top;
   state.raw_viewport = Cam.measure_raw_metrics(refs.raw_textarea);
   focus_raw_tile_from_camera();
+}
+
+function reset_raw_zoom_to_default(): void {
+  refs.raw_textarea.style.fontSize = `${raw_font_default_px}px`;
+  state.raw_viewport = Cam.measure_raw_metrics(refs.raw_textarea);
 }
 
 function escape_html(text: string): string {
@@ -1051,10 +1057,17 @@ function render_modal(): void {
   }
 }
 
-function toggle_sync_view(): void {
-  state.sync_view.enabled = !state.sync_view.enabled;
-  Dom.set_sync_view_ui(refs, state.sync_view.enabled);
+function set_sync_view_enabled(enabled: boolean): void {
+  state.sync_view.enabled = enabled;
+  Dom.set_sync_view_ui(refs, enabled);
+  if (!enabled) {
+    reset_raw_zoom_to_default();
+  }
   refresh_status();
+}
+
+function toggle_sync_view(): void {
+  set_sync_view_enabled(!state.sync_view.enabled);
 }
 
 function modal_is_open(): boolean {
@@ -1590,9 +1603,7 @@ function bind_events(): void {
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
   refs.mode_visual_btn.addEventListener("click", () => set_mode("visual"));
   refs.sync_view_toggle.addEventListener("change", () => {
-    state.sync_view.enabled = refs.sync_view_toggle.checked;
-    Dom.set_sync_view_ui(refs, state.sync_view.enabled);
-    refresh_status();
+    set_sync_view_enabled(refs.sync_view_toggle.checked);
   });
   refs.modal_close_btn.addEventListener("click", () => close_modal());
   refs.modal_backdrop.addEventListener("click", () => close_modal());
