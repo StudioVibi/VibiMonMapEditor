@@ -691,30 +691,120 @@ function render_save_modal(): void {
   const is_save_as = save_mode === "save-as";
   Dom.set_modal_title(refs, is_save_as ? "Save As New" : "Save Level");
   refs.modal_body.innerHTML = `
-    <form id="save-form" class="modal-form">
-      <label class="modal-field-label" for="save-level-name">Level Name</label>
-      <input id="save-level-name" class="modal-input" type="text" maxlength="80" />
-      <p id="save-help" class="modal-help"></p>
-      <div class="modal-actions">
-        <button id="save-cancel" class="modal-btn" type="button">Cancel</button>
-        <button class="modal-btn primary" type="submit">${is_save_as ? "Save As" : "Save"}</button>
-      </div>
-    </form>
+    <div class="save-layout">
+      <form id="save-form" class="modal-form save-form">
+        <label class="modal-field-label" for="save-level-name">Level Name</label>
+        <input id="save-level-name" class="modal-input" type="text" maxlength="80" />
+        <p id="save-help" class="modal-help"></p>
+        <div class="modal-actions">
+          <button id="save-cancel" class="modal-btn" type="button">Cancel</button>
+          <button class="modal-btn primary" type="submit">${is_save_as ? "Save As" : "Save"}</button>
+        </div>
+      </form>
+      <section class="save-existing-pane" aria-label="Existing levels">
+        <h3 class="save-existing-title">Existing Levels</h3>
+        <div id="save-existing-list" class="save-existing-list sprite-list"></div>
+      </section>
+    </div>
   `;
 
   const form = refs.modal_body.querySelector("#save-form") as HTMLFormElement;
   const name_input = refs.modal_body.querySelector("#save-level-name") as HTMLInputElement;
   const help_el = refs.modal_body.querySelector("#save-help") as HTMLParagraphElement;
   const cancel_btn = refs.modal_body.querySelector("#save-cancel") as HTMLButtonElement;
+  const existing_list = refs.modal_body.querySelector("#save-existing-list") as HTMLDivElement;
   const base_help = is_save_as
     ? "Save As creates a new local level, keeping the current one."
     : "Save will update the current level when it already exists.";
-  help_el.textContent = modal_error_text || base_help;
-  help_el.classList.toggle("error", !!modal_error_text);
+
+  let help_text = modal_error_text || base_help;
+  let help_is_error = !!modal_error_text;
+  let existing_levels: T.PersistedLevel[] = [];
+  try {
+    existing_levels = sorted_levels(Store.list_levels());
+  } catch (err) {
+    if (!help_is_error) {
+      help_text = `Could not list saved levels: ${String(err)}`;
+      help_is_error = true;
+    }
+  }
+
+  help_el.textContent = help_text;
+  help_el.classList.toggle("error", help_is_error);
   name_input.value = state.current_level_name || "";
   name_input.focus();
   name_input.select();
 
+  let selected_existing_id: string | null = state.current_level_id;
+  const sync_existing_highlight = () => {
+    for (const child of existing_list.children) {
+      if (!(child instanceof HTMLButtonElement)) {
+        continue;
+      }
+      child.classList.toggle("active", child.dataset.levelId === selected_existing_id);
+    }
+  };
+  const sync_selected_from_input = () => {
+    const query = name_input.value.trim().toLowerCase();
+    const match = existing_levels.find((level) => level.name.toLowerCase() === query);
+    selected_existing_id = match ? match.id : null;
+    sync_existing_highlight();
+  };
+
+  existing_list.innerHTML = "";
+  if (existing_levels.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "save-existing-empty";
+    empty.textContent = "No saved levels yet.";
+    existing_list.appendChild(empty);
+  } else {
+    for (const level of existing_levels) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "save-existing-item sprite-item";
+      item.dataset.levelId = level.id;
+
+      const badge = document.createElement("span");
+      badge.className = "save-existing-badge";
+      badge.textContent = "LV";
+      item.appendChild(badge);
+
+      const glyph = document.createElement("span");
+      glyph.className = "sprite-glyph";
+      glyph.textContent = `${level.grid_width}x${level.grid_height}`;
+      item.appendChild(glyph);
+
+      const details = document.createElement("span");
+      details.className = "sprite-details";
+
+      const label = document.createElement("span");
+      label.className = "sprite-label";
+      label.textContent = level.name;
+      details.appendChild(label);
+
+      const meta = document.createElement("span");
+      meta.className = "sprite-row-meta";
+      meta.textContent = level_meta(level);
+      details.appendChild(meta);
+
+      item.appendChild(details);
+
+      item.addEventListener("click", () => {
+        selected_existing_id = level.id;
+        name_input.value = level.name;
+        sync_existing_highlight();
+        name_input.focus();
+        name_input.select();
+      });
+
+      existing_list.appendChild(item);
+    }
+  }
+  sync_selected_from_input();
+
+  name_input.addEventListener("input", () => {
+    sync_selected_from_input();
+  });
   cancel_btn.addEventListener("click", () => close_modal());
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
