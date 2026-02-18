@@ -304,25 +304,323 @@ function raw_scroll_to_camera(raw_metrics, viewport, visual_zoom) {
   };
 }
 
+// src/raw-format.ts
+var EMPTY_FLOOR = "___";
+var EMPTY_ENTITY = "   ";
+function normalize_glyph_3(token) {
+  if (token.length === 3) {
+    return token;
+  }
+  if (token.length < 3) {
+    return token.padEnd(3, " ");
+  }
+  return token.slice(0, 3);
+}
+function parse_line(line) {
+  let text = line;
+  if (text.endsWith("\r")) {
+    text = text.slice(0, -1);
+  }
+  if (text.length === 0) {
+    return { ok: true, row: [] };
+  }
+  if (text.length % 4 !== 0) {
+    return { ok: false, error: "line width must be a multiple of 4." };
+  }
+  const row = [];
+  for (let i = 0;i < text.length; i += 4) {
+    const cell = text.slice(i, i + 4);
+    if (cell.length !== 4 || cell[3] !== "|") {
+      return {
+        ok: false,
+        error: `invalid cell separator at column ${i + 4}.`
+      };
+    }
+    row.push(normalize_glyph_3(cell.slice(0, 3)));
+  }
+  return { ok: true, row };
+}
+function make_empty_grid(width, height) {
+  const cells = [];
+  for (let y = 0;y < height; y++) {
+    const row = [];
+    for (let x = 0;x < width; x++) {
+      row.push({ floor: EMPTY_FLOOR, entity: EMPTY_ENTITY });
+    }
+    cells.push(row);
+  }
+  return { width, height, cells };
+}
+function clone_grid(grid) {
+  return {
+    width: grid.width,
+    height: grid.height,
+    cells: grid.cells.map((row) => row.map((cell) => ({ ...cell })))
+  };
+}
+function serialize_raw(grid) {
+  const lines = [];
+  for (let y = 0;y < grid.height; y++) {
+    let entity_line = "";
+    let floor_line = "";
+    for (let x = 0;x < grid.width; x++) {
+      const cell = grid.cells[y][x];
+      entity_line += `${normalize_glyph_3(cell.entity)}|`;
+      floor_line += `${normalize_glyph_3(cell.floor)}|`;
+    }
+    lines.push(entity_line);
+    lines.push(floor_line);
+  }
+  return lines.join(`
+`);
+}
+function parse_raw(text) {
+  const lines = text.split(`
+`).map((line) => line.endsWith("\r") ? line.slice(0, -1) : line).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) {
+    return { ok: false, error: "RAW is empty." };
+  }
+  if (lines.length % 2 !== 0) {
+    return { ok: false, error: "RAW must have an even number of lines." };
+  }
+  const entity_rows = [];
+  const floor_rows = [];
+  for (let i = 0;i < lines.length; i += 2) {
+    const entity_row_res = parse_line(lines[i]);
+    if (!entity_row_res.ok) {
+      return { ok: false, error: `Line ${i + 1}: ${entity_row_res.error}` };
+    }
+    const floor_row_res = parse_line(lines[i + 1]);
+    if (!floor_row_res.ok) {
+      return { ok: false, error: `Line ${i + 2}: ${floor_row_res.error}` };
+    }
+    const entity_row = entity_row_res.row;
+    const floor_row = floor_row_res.row;
+    if (entity_row.length !== floor_row.length) {
+      const line_no = i + 1;
+      return {
+        ok: false,
+        error: `Line ${line_no}: entity and floor have different widths.`
+      };
+    }
+    entity_rows.push(entity_row);
+    floor_rows.push(floor_row);
+  }
+  const width = floor_rows[0]?.length ?? 0;
+  if (width === 0) {
+    return { ok: false, error: "RAW has no valid columns." };
+  }
+  for (let y = 0;y < floor_rows.length; y++) {
+    if (floor_rows[y].length !== width || entity_rows[y].length !== width) {
+      return { ok: false, error: `Tile row ${y + 1} has inconsistent width.` };
+    }
+  }
+  const cells = [];
+  for (let y = 0;y < floor_rows.length; y++) {
+    const row = [];
+    for (let x = 0;x < width; x++) {
+      row.push({
+        entity: normalize_glyph_3(entity_rows[y][x]),
+        floor: normalize_glyph_3(floor_rows[y][x])
+      });
+    }
+    cells.push(row);
+  }
+  return {
+    ok: true,
+    grid: {
+      width,
+      height: floor_rows.length,
+      cells
+    }
+  };
+}
+
 // src/glyph-catalog.ts
 function label_from_name(name) {
   return name.replace(/^tile_/, "").replace(/^ent_/, "").replace(/^icon_/, "").replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
-function parse_bool(block, key) {
-  const re = new RegExp(`${key}:\\s*(true|false)`);
-  const m = block.match(re);
-  if (!m) {
-    return false;
+function normalize_token(token) {
+  if (token.length === 3) {
+    return token;
   }
-  return m[1] === "true";
+  if (token.length < 3) {
+    return token.padEnd(3, " ");
+  }
+  return token.slice(0, 3);
 }
-function parse_num(block, key, fallback) {
-  const re = new RegExp(`${key}:\\s*(\\d+)`);
-  const m = block.match(re);
-  if (!m) {
+function parse_num(str, fallback = 1) {
+  const n = Number(str.trim());
+  if (!Number.isFinite(n) || n <= 0) {
     return fallback;
   }
-  return Number(m[1]);
+  return Math.floor(n);
+}
+function parse_bool(str, fallback = false) {
+  const v = str.trim();
+  if (v === "true") {
+    return true;
+  }
+  if (v === "false") {
+    return false;
+  }
+  return fallback;
+}
+function split_call_args(text) {
+  const args = [];
+  let current = "";
+  let depth = 0;
+  let in_string = false;
+  let escaped = false;
+  for (let i = 0;i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      current += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      current += ch;
+      in_string = !in_string;
+      continue;
+    }
+    if (!in_string) {
+      if (ch === "(" || ch === "[" || ch === "{") {
+        depth += 1;
+      } else if (ch === ")" || ch === "]" || ch === "}") {
+        depth = Math.max(0, depth - 1);
+      } else if (ch === "," && depth === 0) {
+        args.push(current.trim());
+        current = "";
+        continue;
+      }
+    }
+    current += ch;
+  }
+  if (current.trim()) {
+    args.push(current.trim());
+  }
+  return args;
+}
+function strip_quotes(value) {
+  const v = value.trim();
+  if (v.length < 2 || v[0] !== '"' || v[v.length - 1] !== '"') {
+    return null;
+  }
+  return v.slice(1, -1);
+}
+function decode_escaped_literal(value) {
+  const safe = value.replace(/"/g, "\\\"");
+  try {
+    return JSON.parse(`"${safe}"`);
+  } catch {
+    return value;
+  }
+}
+function push_unique(tokens, next) {
+  for (const tok of tokens) {
+    if (tok.token === next.token) {
+      return;
+    }
+  }
+  tokens.push(next);
+}
+function parse_new_entries(source) {
+  const out = [];
+  const entry_re = /"((?:\\.|[^"])*)"\s*:\s*Glyph\.(none|bigimg|borded|entity|player)(?:\(([\s\S]*?)\))?\s*,?/g;
+  let m = entry_re.exec(source);
+  while (m) {
+    const token = normalize_token(decode_escaped_literal(m[1]));
+    const kind = m[2];
+    const args = split_call_args(m[3] || "");
+    if (kind === "none") {
+      push_unique(out, {
+        token,
+        kind,
+        layer: "entity",
+        name: "none",
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: null,
+        label: "Empty"
+      });
+      m = entry_re.exec(source);
+      continue;
+    }
+    if (kind === "player") {
+      push_unique(out, {
+        token,
+        kind,
+        layer: "entity",
+        name: "Player",
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: "ent_red",
+        label: "Player"
+      });
+      m = entry_re.exec(source);
+      continue;
+    }
+    if (kind === "bigimg") {
+      const name = strip_quotes(args[0] || "") || token;
+      const width = parse_num(args[1] || "1", 1);
+      const height = parse_num(args[2] || "1", 1);
+      const single = parse_bool(args[3] || "false", false);
+      push_unique(out, {
+        token,
+        kind,
+        layer: "floor",
+        name,
+        width,
+        height,
+        single,
+        sprite: null,
+        label: label_from_name(name)
+      });
+      m = entry_re.exec(source);
+      continue;
+    }
+    if (kind === "borded") {
+      const name = strip_quotes(args[0] || "") || token;
+      push_unique(out, {
+        token,
+        kind,
+        layer: "floor",
+        name,
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: null,
+        label: label_from_name(name)
+      });
+      m = entry_re.exec(source);
+      continue;
+    }
+    if (kind === "entity") {
+      const label_name = strip_quotes(args[0] || "") || token;
+      const sprite = strip_quotes(args[1] || "");
+      push_unique(out, {
+        token,
+        kind,
+        layer: "entity",
+        name: label_name,
+        width: 1,
+        height: 1,
+        single: false,
+        sprite,
+        label: label_from_name(label_name)
+      });
+    }
+    m = entry_re.exec(source);
+  }
+  return out;
 }
 function parse_str(block, key) {
   const re = new RegExp(`${key}:\\s*"([^"]+)"`);
@@ -332,50 +630,117 @@ function parse_str(block, key) {
   }
   return m[1];
 }
-function parse_glyph_entries(source) {
+function parse_num_field(block, key, fallback) {
+  const re = new RegExp(`${key}:\\s*(\\d+)`);
+  const m = block.match(re);
+  if (!m) {
+    return fallback;
+  }
+  return Number(m[1]);
+}
+function parse_legacy_entries(source) {
   const out = [];
   const token_re = /"([^"]{2})"\s*:\s*\{([\s\S]*?)\n\s*\},?/g;
   let m = token_re.exec(source);
   while (m) {
-    const token = m[1];
+    const token = normalize_token(m[1]);
     const block = m[2];
-    const kind = parse_str(block, "kind");
-    const name = parse_str(block, "name") || token;
-    const width = parse_num(block, "width", 1);
-    const height = parse_num(block, "height", 1);
-    const wall = parse_bool(block, "wall");
+    const legacy_kind = parse_str(block, "kind");
+    const name = parse_str(block, "name") || token.trim();
+    const width = Math.max(1, parse_num_field(block, "width", 1));
+    const height = Math.max(1, parse_num_field(block, "height", 1));
     const sprite = parse_str(block, "sprite");
-    if (kind) {
-      out.push({
+    if (legacy_kind === "bordered") {
+      push_unique(out, {
         token,
-        kind,
+        kind: "borded",
+        layer: "floor",
+        name,
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: null,
+        label: label_from_name(name)
+      });
+    } else if (legacy_kind === "entity") {
+      const is_player = (sprite || "").startsWith("ent_") && name.toLowerCase() === "player";
+      push_unique(out, {
+        token,
+        kind: is_player ? "player" : "entity",
+        layer: "entity",
+        name,
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: sprite || null,
+        label: label_from_name(name)
+      });
+    } else if (legacy_kind === "building") {
+      const as_entity = name.startsWith("icon_") || name === "tile_mountain_door";
+      push_unique(out, {
+        token,
+        kind: as_entity ? "entity" : "bigimg",
+        layer: as_entity ? "entity" : "floor",
         name,
         width,
         height,
-        wall,
-        sprite,
+        single: false,
+        sprite: as_entity ? name : null,
         label: label_from_name(name)
       });
     }
     m = token_re.exec(source);
   }
-  out.push({
-    token: "::",
-    kind: "building",
-    name: "tile_grass_00_00",
+  return out;
+}
+function ensure_defaults(tokens) {
+  const out = [...tokens];
+  push_unique(out, {
+    token: EMPTY_ENTITY,
+    kind: "none",
+    layer: "entity",
+    name: "none",
     width: 1,
     height: 1,
-    wall: false,
+    single: false,
+    sprite: null,
+    label: "Empty"
+  });
+  push_unique(out, {
+    token: EMPTY_FLOOR,
+    kind: "bigimg",
+    layer: "floor",
+    name: "tile_grass",
+    width: 1,
+    height: 1,
+    single: false,
     sprite: null,
     label: "Grass"
   });
+  const rank = {
+    none: 0,
+    bigimg: 1,
+    borded: 2,
+    entity: 3,
+    player: 4
+  };
   out.sort((a, b) => {
-    if (a.kind !== b.kind) {
-      return a.kind.localeCompare(b.kind);
+    const ar = rank[a.kind] ?? 99;
+    const br = rank[b.kind] ?? 99;
+    if (ar !== br) {
+      return ar - br;
     }
     return a.token.localeCompare(b.token);
   });
   return out;
+}
+function parse_glyph_entries(source) {
+  const modern = parse_new_entries(source);
+  if (modern.length > 0) {
+    return ensure_defaults(modern);
+  }
+  const legacy = parse_legacy_entries(source);
+  return ensure_defaults(legacy);
 }
 async function load_glyph_catalog() {
   const candidates = ["vibimon-assets/Glyph.ts", "VibiMon/src/data/Glyph.ts"];
@@ -554,7 +919,7 @@ function bind_shortcuts(handlers) {
 }
 
 // src/level-storage.ts
-var STORAGE_KEY = "vibimon_map_editor_levels_v1";
+var STORAGE_KEY = "vibimon_map_editor_levels_v2";
 function now_iso() {
   return new Date().toISOString();
 }
@@ -722,119 +1087,16 @@ function delete_level(id) {
   return true;
 }
 
-// src/raw-format.ts
-var EMPTY_FLOOR = "::";
-var EMPTY_ENTITY = "  ";
-function parse_line(line) {
-  let text = line;
-  if (text.length % 4 === 3) {
-    text += " ";
-  }
-  const row = [];
-  for (let i = 0;i < text.length; i += 4) {
-    const cell = text.slice(i, i + 4);
-    row.push(cell.slice(1, 3));
-  }
-  return row;
-}
-function ensure_glyph_2(token) {
-  if (token.length === 2) {
+// src/state.ts
+function normalize_glyph(token) {
+  if (token.length === 3) {
     return token;
   }
-  if (token.length < 2) {
-    return token.padEnd(2, " ");
+  if (token.length < 3) {
+    return token.padEnd(3, " ");
   }
-  return token.slice(0, 2);
+  return token.slice(0, 3);
 }
-function make_empty_grid(width, height) {
-  const cells = [];
-  for (let y = 0;y < height; y++) {
-    const row = [];
-    for (let x = 0;x < width; x++) {
-      row.push({ floor: EMPTY_FLOOR, entity: EMPTY_ENTITY });
-    }
-    cells.push(row);
-  }
-  return { width, height, cells };
-}
-function clone_grid(grid) {
-  return {
-    width: grid.width,
-    height: grid.height,
-    cells: grid.cells.map((row) => row.map((cell) => ({ ...cell })))
-  };
-}
-function serialize_raw(grid) {
-  const lines = [];
-  for (let y = 0;y < grid.height; y++) {
-    let entity_line = "";
-    let floor_line = "";
-    for (let x = 0;x < grid.width; x++) {
-      const cell = grid.cells[y][x];
-      entity_line += ` ${ensure_glyph_2(cell.entity)} `;
-      floor_line += ` ${ensure_glyph_2(cell.floor)} `;
-    }
-    lines.push(entity_line);
-    lines.push(floor_line);
-  }
-  return lines.join(`
-`);
-}
-function parse_raw(text) {
-  const lines = text.split(`
-`);
-  if (lines.length === 0) {
-    return { ok: false, error: "RAW is empty." };
-  }
-  if (lines.length % 2 !== 0) {
-    return { ok: false, error: "RAW must have an even number of lines." };
-  }
-  const entity_rows = [];
-  const floor_rows = [];
-  for (let i = 0;i < lines.length; i += 2) {
-    const entity_row = parse_line(lines[i]);
-    const floor_row = parse_line(lines[i + 1]);
-    if (entity_row.length !== floor_row.length) {
-      const line_no = i + 1;
-      return {
-        ok: false,
-        error: `Line ${line_no}: entity and floor have different widths.`
-      };
-    }
-    entity_rows.push(entity_row);
-    floor_rows.push(floor_row);
-  }
-  const width = floor_rows[0]?.length ?? 0;
-  if (width === 0) {
-    return { ok: false, error: "RAW has no valid columns." };
-  }
-  for (let y = 0;y < floor_rows.length; y++) {
-    if (floor_rows[y].length !== width || entity_rows[y].length !== width) {
-      return { ok: false, error: `Tile row ${y + 1} has inconsistent width.` };
-    }
-  }
-  const cells = [];
-  for (let y = 0;y < floor_rows.length; y++) {
-    const row = [];
-    for (let x = 0;x < width; x++) {
-      row.push({
-        entity: ensure_glyph_2(entity_rows[y][x]),
-        floor: ensure_glyph_2(floor_rows[y][x])
-      });
-    }
-    cells.push(row);
-  }
-  return {
-    ok: true,
-    grid: {
-      width,
-      height: floor_rows.length,
-      cells
-    }
-  };
-}
-
-// src/state.ts
 function create_initial_state() {
   const grid = make_empty_grid(20, 20);
   const raw_text = serialize_raw(grid);
@@ -887,8 +1149,8 @@ function grid_set(grid, x, y, cell) {
     return;
   }
   grid.cells[y][x] = {
-    floor: cell.floor.padEnd(2, " ").slice(0, 2),
-    entity: cell.entity.padEnd(2, " ").slice(0, 2)
+    floor: normalize_glyph(cell.floor),
+    entity: normalize_glyph(cell.entity)
   };
 }
 function is_empty_cell(cell) {
@@ -934,7 +1196,7 @@ function apply_paint_at(grid, x, y, token) {
   if (!in_bounds(grid, x, y)) {
     return;
   }
-  if (token.kind === "building" && (token.width > 1 || token.height > 1)) {
+  if (token.kind === "bigimg" && (token.width > 1 || token.height > 1)) {
     for (let iy = 0;iy < token.height; iy++) {
       for (let ix = 0;ix < token.width; ix++) {
         const tx = x + ix;
@@ -957,7 +1219,7 @@ function apply_paint_at(grid, x, y, token) {
     return;
   }
   const next = { ...cell };
-  if (token.kind === "entity") {
+  if (token.layer === "entity") {
     next.entity = token.token;
   } else {
     next.floor = token.token;
@@ -1051,11 +1313,17 @@ function sprite_id(name, ix, iy) {
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}`;
 }
-function building_asset(name, ix, iy) {
-  if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
+function bigimg_asset(def, ix, iy) {
+  if (def.single) {
+    return `${VIBIMON_ASSET_ROOT}/${def.name}.png`;
   }
-  return `${VIBIMON_ASSET_ROOT}/${sprite_id(name, ix, iy)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id(def.name, ix, iy)}.png`;
+}
+function entity_sprite_asset(sprite) {
+  if (sprite.startsWith("ent_")) {
+    return `${VIBIMON_ASSET_ROOT}/${sprite}_front_stand.png`;
+  }
+  return `${VIBIMON_ASSET_ROOT}/${sprite}.png`;
 }
 function border_id(name, up, dw, lf, rg, up_lf, up_rg, dw_lf, dw_rg) {
   const base = `${name}_`;
@@ -1131,7 +1399,7 @@ function floor_asset(grid, x, y, token_map2) {
   if (!def) {
     return "";
   }
-  if (def.kind === "bordered") {
+  if (def.kind === "borded") {
     const up = same_floor(grid, x, y - 1, tok);
     const dw = same_floor(grid, x, y + 1, tok);
     const lf = same_floor(grid, x - 1, y, tok);
@@ -1143,16 +1411,16 @@ function floor_asset(grid, x, y, token_map2) {
     const id = border_id(def.name, up, dw, lf, rg, up_lf, up_rg, dw_lf, dw_rg);
     return `${VIBIMON_ASSET_ROOT}/${id}.png`;
   }
-  if (def.kind === "building") {
+  if (def.kind === "bigimg") {
     if (def.width > 1 || def.height > 1) {
       const [ox, oy] = top_left_of_block(grid, x, y, tok);
       const ix = (x - ox) % def.width;
       const iy = (y - oy) % def.height;
-      return building_asset(def.name, ix, iy);
+      return bigimg_asset(def, ix, iy);
     }
-    return building_asset(def.name, 0, 0);
+    return bigimg_asset(def, 0, 0);
   }
-  if (def.kind === "marker") {
+  if (def.kind === "none") {
     return DEFAULT_FLOOR_ASSET;
   }
   return "";
@@ -1167,10 +1435,10 @@ function entity_asset(grid, x, y, token_map2) {
     return "";
   }
   const def = token_map2.get(tok);
-  if (!def || def.kind !== "entity" || !def.sprite) {
+  if (!def || def.kind !== "entity" && def.kind !== "player" || !def.sprite) {
     return "";
   }
-  return `${VIBIMON_ASSET_ROOT}/${def.sprite}_front_stand.png`;
+  return entity_sprite_asset(def.sprite);
 }
 function resolve_cell_visual(grid, x, y, token_map2) {
   const cell = grid_get(grid, x, y);
@@ -1263,11 +1531,17 @@ function sprite_id2(name, ix, iy) {
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}`;
 }
-function building_asset2(name, ix, iy) {
-  if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
+function bigimg_asset2(token, ix, iy) {
+  if (token.single) {
+    return `${VIBIMON_ASSET_ROOT}/${token.name}.png`;
   }
-  return `${VIBIMON_ASSET_ROOT}/${sprite_id2(name, ix, iy)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id2(token.name, ix, iy)}.png`;
+}
+function entity_asset2(sprite) {
+  if (sprite.startsWith("ent_")) {
+    return `${VIBIMON_ASSET_ROOT}/${sprite}_front_stand.png`;
+  }
+  return `${VIBIMON_ASSET_ROOT}/${sprite}.png`;
 }
 function create_visual_renderer(stage_el, grid_el, overlay_el) {
   const tile_dom = new Map;
@@ -1445,19 +1719,19 @@ function create_visual_renderer(stage_el, grid_el, overlay_el) {
         tile.style.top = `${iy * TILE_SIZE}px`;
         tile.style.width = `${TILE_SIZE}px`;
         tile.style.height = `${TILE_SIZE}px`;
-        if (token.kind === "entity" && token.sprite) {
+        if ((token.kind === "entity" || token.kind === "player") && token.sprite) {
           const entity = document.createElement("img");
           entity.className = "move-preview-entity";
           entity.alt = "";
-          apply_image(entity, `${VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`, "hide");
+          apply_image(entity, entity_asset2(token.sprite), "hide");
           tile.appendChild(entity);
-        } else if (token.kind === "building") {
+        } else if (token.kind === "bigimg") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
-          apply_image(floor, token.width > 1 || token.height > 1 ? building_asset2(token.name, ix, iy) : building_asset2(token.name, 0, 0), "fallback-floor");
+          apply_image(floor, token.width > 1 || token.height > 1 ? bigimg_asset2(token, ix, iy) : bigimg_asset2(token, 0, 0), "fallback-floor");
           tile.appendChild(floor);
-        } else if (token.kind === "bordered") {
+        } else if (token.kind === "borded") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
@@ -1549,24 +1823,30 @@ function sprite_id3(name, ix, iy) {
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}`;
 }
-function building_preview_asset(name) {
-  if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
+function bigimg_preview_asset(token) {
+  if (token.single) {
+    return `${VIBIMON_ASSET_ROOT}/${token.name}.png`;
   }
-  return `${VIBIMON_ASSET_ROOT}/${sprite_id3(name, 0, 0)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id3(token.name, 0, 0)}.png`;
+}
+function entity_preview_asset(sprite) {
+  if (sprite.startsWith("ent_")) {
+    return `${VIBIMON_ASSET_ROOT}/${sprite}_front_stand.png`;
+  }
+  return `${VIBIMON_ASSET_ROOT}/${sprite}.png`;
 }
 function preview_asset(token) {
-  if (token.token === "::") {
+  if (token.token === EMPTY_FLOOR) {
     return DEFAULT_FLOOR_ASSET;
   }
-  if (token.kind === "entity" && token.sprite) {
-    return `${VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`;
+  if ((token.kind === "entity" || token.kind === "player") && token.sprite) {
+    return entity_preview_asset(token.sprite);
   }
-  if (token.kind === "bordered") {
+  if (token.kind === "borded") {
     return `${VIBIMON_ASSET_ROOT}/${token.name}_center.png`;
   }
-  if (token.kind === "building") {
-    return building_preview_asset(token.name);
+  if (token.kind === "bigimg") {
+    return bigimg_preview_asset(token);
   }
   return DEFAULT_FLOOR_ASSET;
 }
@@ -3032,7 +3312,7 @@ async function init_tokens() {
     set_status(refs, `Failed to load glyph catalog: ${String(err)}`);
   }
   render_token_list();
-  const preferred = tokens.find((entry) => entry.token === "TT");
+  const preferred = tokens.find((entry) => entry.token === EMPTY_FLOOR);
   if (preferred) {
     select_token(preferred);
   } else if (tokens.length > 0) {

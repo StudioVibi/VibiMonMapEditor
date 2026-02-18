@@ -1,13 +1,14 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-type GlyphKind = "building" | "bordered" | "entity" | "marker";
+type GlyphKind = "bigimg" | "borded" | "entity" | "player";
 
 interface GlyphToken {
   kind: GlyphKind;
   name: string;
   width: number;
   height: number;
+  single: boolean;
   sprite: string | null;
 }
 
@@ -41,13 +42,170 @@ function ensure_dir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
-function parse_num(block: string, key: string, fallback: number): number {
-  const re = new RegExp(`${key}:\\s*(\\d+)`);
-  const m = block.match(re);
-  if (!m) {
+function parse_num(str: string, fallback = 1): number {
+  const n = Number(str.trim());
+  if (!Number.isFinite(n) || n <= 0) {
     return fallback;
   }
-  return Number(m[1]);
+  return Math.floor(n);
+}
+
+function parse_bool(str: string, fallback = false): boolean {
+  const v = str.trim();
+  if (v === "true") {
+    return true;
+  }
+  if (v === "false") {
+    return false;
+  }
+  return fallback;
+}
+
+function split_call_args(text: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let depth = 0;
+  let in_string = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      current += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === "\"") {
+      current += ch;
+      in_string = !in_string;
+      continue;
+    }
+
+    if (!in_string) {
+      if (ch === "(" || ch === "[" || ch === "{") {
+        depth += 1;
+      } else if (ch === ")" || ch === "]" || ch === "}") {
+        depth = Math.max(0, depth - 1);
+      } else if (ch === "," && depth === 0) {
+        args.push(current.trim());
+        current = "";
+        continue;
+      }
+    }
+    current += ch;
+  }
+
+  if (current.trim()) {
+    args.push(current.trim());
+  }
+
+  return args;
+}
+
+function strip_quotes(value: string): string | null {
+  const v = value.trim();
+  if (v.length < 2 || v[0] !== "\"" || v[v.length - 1] !== "\"") {
+    return null;
+  }
+  return v.slice(1, -1);
+}
+
+function decode_escaped_literal(value: string): string {
+  const safe = value.replace(/"/g, "\\\"");
+  try {
+    return JSON.parse(`"${safe}"`) as string;
+  } catch {
+    return value;
+  }
+}
+
+function parse_modern_glyph_entries(source: string): GlyphToken[] {
+  const out: GlyphToken[] = [];
+  const entry_re =
+    /"((?:\\.|[^"])*)"\s*:\s*Glyph\.(none|bigimg|borded|entity|player)(?:\(([\s\S]*?)\))?\s*,?/g;
+
+  let m: RegExpExecArray | null = entry_re.exec(source);
+  while (m) {
+    const token = decode_escaped_literal(m[1]);
+    if (token.length !== 3) {
+      m = entry_re.exec(source);
+      continue;
+    }
+    const kind = m[2];
+    const args = split_call_args(m[3] || "");
+
+    if (kind === "none") {
+      m = entry_re.exec(source);
+      continue;
+    }
+
+    if (kind === "player") {
+      out.push({
+        kind: "player",
+        name: "Player",
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: "ent_red"
+      });
+      m = entry_re.exec(source);
+      continue;
+    }
+
+    if (kind === "bigimg") {
+      const name = strip_quotes(args[0] || "") || "tile_grass";
+      out.push({
+        kind: "bigimg",
+        name,
+        width: parse_num(args[1] || "1", 1),
+        height: parse_num(args[2] || "1", 1),
+        single: parse_bool(args[3] || "false", false),
+        sprite: null
+      });
+      m = entry_re.exec(source);
+      continue;
+    }
+
+    if (kind === "borded") {
+      const name = strip_quotes(args[0] || "") || "tile_mountain";
+      out.push({
+        kind: "borded",
+        name,
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: null
+      });
+      m = entry_re.exec(source);
+      continue;
+    }
+
+    if (kind === "entity") {
+      const sprite = strip_quotes(args[1] || "");
+      if (!sprite) {
+        m = entry_re.exec(source);
+        continue;
+      }
+      out.push({
+        kind: "entity",
+        name: strip_quotes(args[0] || "") || "Entity",
+        width: 1,
+        height: 1,
+        single: false,
+        sprite
+      });
+    }
+
+    m = entry_re.exec(source);
+  }
+
+  return out;
 }
 
 function parse_str(block: string, key: string): string | null {
@@ -59,26 +217,64 @@ function parse_str(block: string, key: string): string | null {
   return m[1];
 }
 
-function parse_glyph_entries(source: string): GlyphToken[] {
+function parse_num_field(block: string, key: string, fallback: number): number {
+  const re = new RegExp(`${key}:\\s*(\\d+)`);
+  const m = block.match(re);
+  if (!m) {
+    return fallback;
+  }
+  return Number(m[1]);
+}
+
+function parse_legacy_glyph_entries(source: string): GlyphToken[] {
   const out: GlyphToken[] = [];
   const token_re = /"([^"]{2})"\s*:\s*\{([\s\S]*?)\n\s*\},?/g;
   let m: RegExpExecArray | null = token_re.exec(source);
 
   while (m) {
-    const token = m[1];
     const block = m[2];
-    const kind = parse_str(block, "kind") as GlyphKind | null;
-    const name = parse_str(block, "name") || token;
-    const width = parse_num(block, "width", 1);
-    const height = parse_num(block, "height", 1);
+    const legacy_kind = parse_str(block, "kind");
+    const name = parse_str(block, "name") || "unknown";
+    const width = Math.max(1, parse_num_field(block, "width", 1));
+    const height = Math.max(1, parse_num_field(block, "height", 1));
     const sprite = parse_str(block, "sprite");
 
-    if (kind) {
+    if (legacy_kind === "building") {
+      if (name.startsWith("icon_") || name === "tile_mountain_door") {
+        out.push({
+          kind: "entity",
+          name,
+          width: 1,
+          height: 1,
+          single: false,
+          sprite: name
+        });
+      } else {
+        out.push({
+          kind: "bigimg",
+          name,
+          width,
+          height,
+          single: false,
+          sprite: null
+        });
+      }
+    } else if (legacy_kind === "bordered") {
       out.push({
-        kind,
+        kind: "borded",
         name,
-        width: Math.max(1, width),
-        height: Math.max(1, height),
+        width: 1,
+        height: 1,
+        single: false,
+        sprite: null
+      });
+    } else if (legacy_kind === "entity" && sprite) {
+      out.push({
+        kind: name.toLowerCase() === "player" && sprite.startsWith("ent_") ? "player" : "entity",
+        name,
+        width: 1,
+        height: 1,
+        single: false,
         sprite
       });
     }
@@ -89,10 +285,25 @@ function parse_glyph_entries(source: string): GlyphToken[] {
   return out;
 }
 
+function parse_glyph_entries(source: string): GlyphToken[] {
+  const modern = parse_modern_glyph_entries(source);
+  if (modern.length > 0) {
+    return modern;
+  }
+  return parse_legacy_glyph_entries(source);
+}
+
 function sprite_id(name: string, ix: number, iy: number): string {
   const pad_x = String(ix).padStart(2, "0");
   const pad_y = String(iy).padStart(2, "0");
   return `${name}_${pad_x}_${pad_y}.png`;
+}
+
+function entity_sprite_file(sprite: string): string {
+  if (sprite.startsWith("ent_")) {
+    return `${sprite}_front_stand.png`;
+  }
+  return `${sprite}.png`;
 }
 
 function collect_expected_files(tokens: GlyphToken[]): Set<string> {
@@ -100,8 +311,8 @@ function collect_expected_files(tokens: GlyphToken[]): Set<string> {
   expected.add(FALLBACK_NAME);
 
   for (const token of tokens) {
-    if (token.kind === "building") {
-      if (token.name.startsWith("icon_") || token.name === "tile_mountain_door") {
+    if (token.kind === "bigimg") {
+      if (token.single) {
         expected.add(`${token.name}.png`);
       } else {
         for (let iy = 0; iy < token.height; iy++) {
@@ -113,15 +324,15 @@ function collect_expected_files(tokens: GlyphToken[]): Set<string> {
       continue;
     }
 
-    if (token.kind === "bordered") {
+    if (token.kind === "borded") {
       for (const suffix of BORDER_SUFFIXES) {
         expected.add(`${token.name}_${suffix}.png`);
       }
       continue;
     }
 
-    if (token.kind === "entity" && token.sprite) {
-      expected.add(`${token.sprite}_front_stand.png`);
+    if ((token.kind === "entity" || token.kind === "player") && token.sprite) {
+      expected.add(entity_sprite_file(token.sprite));
     }
   }
 

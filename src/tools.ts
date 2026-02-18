@@ -16,7 +16,7 @@ export function apply_paint_at(
     return;
   }
 
-  if (token.kind === "building" && (token.width > 1 || token.height > 1)) {
+  if (token.kind === "bigimg" && (token.width > 1 || token.height > 1)) {
     for (let iy = 0; iy < token.height; iy++) {
       for (let ix = 0; ix < token.width; ix++) {
         const tx = x + ix;
@@ -41,7 +41,7 @@ export function apply_paint_at(
   }
 
   const next = { ...cell };
-  if (token.kind === "entity") {
+  if (token.layer === "entity") {
     next.entity = token.token;
   } else {
     next.floor = token.token;

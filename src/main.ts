@@ -118,28 +118,35 @@ function sprite_id(name: string, ix: number, iy: number): string {
   return `${name}_${pad_x}_${pad_y}`;
 }
 
-function building_preview_asset(name: string): string {
-  if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
+function bigimg_preview_asset(token: T.GlyphToken): string {
+  if (token.single) {
+    return `${VIBIMON_ASSET_ROOT}/${token.name}.png`;
   }
-  return `${VIBIMON_ASSET_ROOT}/${sprite_id(name, 0, 0)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id(token.name, 0, 0)}.png`;
+}
+
+function entity_preview_asset(sprite: string): string {
+  if (sprite.startsWith("ent_")) {
+    return `${VIBIMON_ASSET_ROOT}/${sprite}_front_stand.png`;
+  }
+  return `${VIBIMON_ASSET_ROOT}/${sprite}.png`;
 }
 
 function preview_asset(token: T.GlyphToken): string {
-  if (token.token === "::") {
+  if (token.token === Raw.EMPTY_FLOOR) {
     return DEFAULT_FLOOR_ASSET;
   }
 
-  if (token.kind === "entity" && token.sprite) {
-    return `${VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`;
+  if ((token.kind === "entity" || token.kind === "player") && token.sprite) {
+    return entity_preview_asset(token.sprite);
   }
 
-  if (token.kind === "bordered") {
+  if (token.kind === "borded") {
     return `${VIBIMON_ASSET_ROOT}/${token.name}_center.png`;
   }
 
-  if (token.kind === "building") {
-    return building_preview_asset(token.name);
+  if (token.kind === "bigimg") {
+    return bigimg_preview_asset(token);
   }
 
   return DEFAULT_FLOOR_ASSET;
@@ -1866,7 +1873,7 @@ async function init_tokens(): Promise<void> {
 
   render_token_list();
 
-  const preferred = tokens.find((entry) => entry.token === "TT");
+  const preferred = tokens.find((entry) => entry.token === Raw.EMPTY_FLOOR);
   if (preferred) {
     select_token(preferred);
   } else if (tokens.length > 0) {

@@ -1,8 +1,11 @@
-export type Glyph2 = string;
+export type Glyph = string;
+
+export type GlyphKind = "none" | "bigimg" | "borded" | "entity" | "player";
+export type GlyphLayer = "floor" | "entity";
 
 export interface TileCell {
-  floor: Glyph2;
-  entity: Glyph2;
+  floor: Glyph;
+  entity: Glyph;
 }
 
 export interface GridState {
@@ -66,15 +69,14 @@ export interface SelectionRect {
   h: number;
 }
 
-export type GlyphKind = "building" | "bordered" | "entity" | "marker";
-
 export interface GlyphToken {
-  token: Glyph2;
+  token: Glyph;
   kind: GlyphKind;
+  layer: GlyphLayer;
   name: string;
   width: number;
   height: number;
-  wall: boolean;
+  single: boolean;
   sprite: string | null;
   label: string;
 }
