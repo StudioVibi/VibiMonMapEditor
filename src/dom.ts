@@ -111,7 +111,7 @@ export function mount_app(root: HTMLElement): DomRefs {
             </div>
           </div>
           <div id="raw-panel" class="panel raw-panel">
-            <textarea id="raw-text" spellcheck="false"></textarea>
+            <textarea id="raw-text" spellcheck="false" wrap="off"></textarea>
             <div id="raw-error" class="raw-error"></div>
           </div>
         </section>

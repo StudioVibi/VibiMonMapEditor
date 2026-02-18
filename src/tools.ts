@@ -16,7 +16,7 @@ export function apply_paint_at(
     return;
   }
 
-  if (token.kind === "bigimg" && (token.width > 1 || token.height > 1)) {
+  if (token.kind === "bigimg" && !token.single && (token.width > 1 || token.height > 1)) {
     for (let iy = 0; iy < token.height; iy++) {
       for (let ix = 0; ix < token.width; ix++) {
         const tx = x + ix;

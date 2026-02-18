@@ -677,12 +677,13 @@ body {
   position: relative;
   min-height: 0;
   height: 100%;
-  overflow: hidden;
+  overflow: auto;
   cursor: url("../assets/cursors/Arrow.svg") 2 2, default;
   background: var(--canvas);
   -webkit-user-select: none;
   -moz-user-select: none;
   user-select: none;
+  scrollbar-gutter: stable both-edges;
 }
 
 .visual-stage[data-tool="move"] {
@@ -881,6 +882,7 @@ body {
   width: 100%;
   height: 100%;
   resize: none;
+  overflow: auto;
   border: 1px solid var(--line);
   background: var(--ios-surface-0);
   font-family: var(--mono);
@@ -889,6 +891,8 @@ body {
   padding: 10px;
   color: var(--ios-text-primary);
   box-shadow: var(--ios-shadow-inset);
+  white-space: pre;
+  word-break: normal;
 }
 
 .raw-error {

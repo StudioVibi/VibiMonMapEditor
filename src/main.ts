@@ -250,8 +250,8 @@ function paint_preview_for_cell(cell: { x: number; y: number } | null): void {
   }
 
   const token = state.selected_token;
-  const w = Math.max(1, token.width || 1);
-  const h = Math.max(1, token.height || 1);
+  const w = token.single ? 1 : Math.max(1, token.width || 1);
+  const h = token.single ? 1 : Math.max(1, token.height || 1);
   const rect = { x: cell.x, y: cell.y, w, h };
   const invalid = rect.x + rect.w > state.grid.width || rect.y + rect.h > state.grid.height;
   visual.set_paint_preview(rect, token, invalid);
@@ -288,8 +288,15 @@ function clamp_camera_to_grid(camera: T.SharedCameraState): T.SharedCameraState 
 
 function capture_camera_from_visual(): void {
   const stage = visual.stage_rect();
+  const scroll_left = refs.visual_stage.scrollLeft;
+  const scroll_top = refs.visual_stage.scrollTop;
+  const viewport = {
+    zoom: state.viewport.zoom,
+    offset_x: state.viewport.offset_x - scroll_left,
+    offset_y: state.viewport.offset_y - scroll_top
+  };
   state.shared_camera = clamp_camera_to_grid(
-    Cam.visual_to_camera(state.viewport, { width: stage.width, height: stage.height })
+    Cam.visual_to_camera(viewport, { width: stage.width, height: stage.height })
   );
 }
 
@@ -305,10 +312,17 @@ function capture_camera_from_raw(): void {
 
 function apply_camera_to_visual(): void {
   const stage = visual.stage_rect();
-  state.viewport = Cam.camera_to_visual(
+  const scroll_left = refs.visual_stage.scrollLeft;
+  const scroll_top = refs.visual_stage.scrollTop;
+  const viewport = Cam.camera_to_visual(
     state.shared_camera,
     { width: stage.width, height: stage.height }
   );
+  state.viewport = {
+    zoom: viewport.zoom,
+    offset_x: viewport.offset_x + scroll_left,
+    offset_y: viewport.offset_y + scroll_top
+  };
 }
 
 function raw_selection_range_for_tile(tile_x: number, tile_y: number): { start: number; end: number } | null {

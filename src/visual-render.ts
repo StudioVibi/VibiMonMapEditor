@@ -214,11 +214,13 @@ export function create_visual_renderer(
 
   function hit_test(client_x: number, client_y: number): { x: number; y: number } | null {
     const rect = stage_rect();
-    const rel_x = client_x - rect.left;
-    const rel_y = client_y - rect.top;
-    if (rel_x < 0 || rel_y < 0 || rel_x > rect.width || rel_y > rect.height) {
+    const view_x = client_x - rect.left;
+    const view_y = client_y - rect.top;
+    if (view_x < 0 || view_y < 0 || view_x > rect.width || view_y > rect.height) {
       return null;
     }
+    const rel_x = view_x + stage_el.scrollLeft;
+    const rel_y = view_y + stage_el.scrollTop;
 
     const transform = getComputedStyle(grid_el).transform;
     const matrix = new DOMMatrixReadOnly(transform === "none" ? undefined : transform);
@@ -395,8 +397,10 @@ export function create_visual_renderer(
     client_y: number
   ): T.ViewportState {
     const rect = stage_rect();
-    const center_x = client_x - rect.left;
-    const center_y = client_y - rect.top;
+    const view_x = client_x - rect.left;
+    const view_y = client_y - rect.top;
+    const center_x = view_x + stage_el.scrollLeft;
+    const center_y = view_y + stage_el.scrollTop;
     const transform = getComputedStyle(grid_el).transform;
     const matrix = new DOMMatrixReadOnly(transform === "none" ? undefined : transform);
     const prev_zoom = matrix.a || 1;
