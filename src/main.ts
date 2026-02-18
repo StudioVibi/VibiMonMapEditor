@@ -199,6 +199,10 @@ function update_dirty_flag(): void {
   state.is_dirty = state.raw_text !== state.last_persisted_raw;
 }
 
+function escape_raw_for_typescript(raw: string): string {
+  return raw.replace(/\\/g, "\\\\");
+}
+
 function refresh_interaction_ui(): void {
   refs.visual_stage.dataset.tool = state.tool;
   const blocked = state.mode === "visual" && state.tool === "paint" && !state.selected_token;
@@ -1728,6 +1732,21 @@ function bind_events(): void {
       update_dirty_flag();
       refresh_status();
     }, raw_debounce_ms);
+  });
+  refs.raw_textarea.addEventListener("copy", (ev) => {
+    const start = refs.raw_textarea.selectionStart;
+    const end = refs.raw_textarea.selectionEnd;
+    if (start === end) {
+      return;
+    }
+    const clipboard = ev.clipboardData;
+    if (!clipboard) {
+      return;
+    }
+    ev.preventDefault();
+    const selected = refs.raw_textarea.value.slice(start, end);
+    clipboard.setData("text/plain", escape_raw_for_typescript(selected));
+    flash_status("RAW copied with TS escaping");
   });
   refs.raw_textarea.addEventListener("wheel", (ev) => {
     if (!ev.ctrlKey && !ev.metaKey) {
