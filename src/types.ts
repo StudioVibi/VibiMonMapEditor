@@ -6,6 +6,7 @@ export type GlyphLayer = "floor" | "entity";
 export interface TileCell {
   floor: Glyph;
   entity: Glyph;
+  entity_backup?: Glyph;
 }
 
 export interface GridState {
@@ -14,7 +15,7 @@ export interface GridState {
   cells: TileCell[][];
 }
 
-export type Tool = "move" | "paint" | "rubber";
+export type Tool = "move" | "collider" | "paint" | "rubber";
 export type ViewMode = "raw" | "visual";
 
 export interface ViewportState {

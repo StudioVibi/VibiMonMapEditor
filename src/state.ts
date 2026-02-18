@@ -73,9 +73,12 @@ export function grid_set(grid: T.GridState, x: number, y: number, cell: T.TileCe
   if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) {
     return;
   }
+  const normalized_backup =
+    typeof cell.entity_backup === "string" ? normalize_glyph(cell.entity_backup) : undefined;
   grid.cells[y][x] = {
     floor: normalize_glyph(cell.floor),
-    entity: normalize_glyph(cell.entity)
+    entity: normalize_glyph(cell.entity),
+    entity_backup: normalized_backup
   };
 }
 

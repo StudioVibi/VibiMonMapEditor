@@ -2,6 +2,7 @@ import type * as T from "./types";
 
 export const EMPTY_FLOOR = "___";
 export const EMPTY_ENTITY = "   ";
+export const COLLIDER_ENTITY = ":::";
 
 function normalize_glyph_3(token: string): string {
   if (token.length === 3) {

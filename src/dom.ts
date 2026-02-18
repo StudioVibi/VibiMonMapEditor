@@ -10,6 +10,7 @@ export interface DomRefs {
   mode_visual_btn: HTMLButtonElement;
   sync_view_toggle: HTMLInputElement;
   add_escape_char_toggle: HTMLInputElement;
+  tool_collider_btn: HTMLButtonElement;
   tool_move_btn: HTMLButtonElement;
   tool_paint_btn: HTMLButtonElement;
   tool_rubber_btn: HTMLButtonElement;
@@ -57,6 +58,12 @@ export function mount_app(root: HTMLElement): DomRefs {
       </header>
       <main class="main-layout">
         <aside class="sidebar">
+          <section class="tool-section">
+            <h2>Collider</h2>
+            <button id="tool-collider" class="tool-btn icon-only" type="button" aria-label="Collider tool" title="Collider">
+              <img src="assets/collider.svg" alt="" />
+            </button>
+          </section>
           <section class="tool-section">
             <h2>Select/Move</h2>
             <button id="tool-move" class="tool-btn icon-only active" type="button" aria-label="Move tool" title="Move">
@@ -135,6 +142,7 @@ export function mount_app(root: HTMLElement): DomRefs {
     mode_visual_btn: root.querySelector("#mode-visual") as HTMLButtonElement,
     sync_view_toggle: root.querySelector("#sync-view") as HTMLInputElement,
     add_escape_char_toggle: root.querySelector("#add-escape-char") as HTMLInputElement,
+    tool_collider_btn: root.querySelector("#tool-collider") as HTMLButtonElement,
     tool_move_btn: root.querySelector("#tool-move") as HTMLButtonElement,
     tool_paint_btn: root.querySelector("#tool-paint") as HTMLButtonElement,
     tool_rubber_btn: root.querySelector("#tool-rubber") as HTMLButtonElement,
@@ -192,6 +200,7 @@ export function set_modal_close_visible(refs: DomRefs, visible: boolean): void {
 }
 
 export function set_tool_ui(refs: DomRefs, tool: T.Tool): void {
+  refs.tool_collider_btn.classList.toggle("active", tool === "collider");
   refs.tool_move_btn.classList.toggle("active", tool === "move");
   refs.tool_paint_btn.classList.toggle("active", tool === "paint");
   refs.tool_rubber_btn.classList.toggle("active", tool === "rubber");

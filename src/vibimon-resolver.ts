@@ -163,8 +163,11 @@ function entity_asset(
   if (!cell) {
     return "";
   }
-  const tok = cell.entity;
-  if (tok === Raw.EMPTY_ENTITY) {
+  let tok = cell.entity;
+  if (tok === Raw.COLLIDER_ENTITY) {
+    tok = typeof cell.entity_backup === "string" ? cell.entity_backup : Raw.EMPTY_ENTITY;
+  }
+  if (tok === Raw.EMPTY_ENTITY || tok === Raw.COLLIDER_ENTITY) {
     return "";
   }
   const def = token_map.get(tok);

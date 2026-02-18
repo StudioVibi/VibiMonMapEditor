@@ -24,6 +24,12 @@ function mount_app(root) {
       <main class="main-layout">
         <aside class="sidebar">
           <section class="tool-section">
+            <h2>Collider</h2>
+            <button id="tool-collider" class="tool-btn icon-only" type="button" aria-label="Collider tool" title="Collider">
+              <img src="assets/collider.svg" alt="" />
+            </button>
+          </section>
+          <section class="tool-section">
             <h2>Select/Move</h2>
             <button id="tool-move" class="tool-btn icon-only active" type="button" aria-label="Move tool" title="Move">
               <img src="assets/move.svg" alt="" />
@@ -100,6 +106,7 @@ function mount_app(root) {
     mode_visual_btn: root.querySelector("#mode-visual"),
     sync_view_toggle: root.querySelector("#sync-view"),
     add_escape_char_toggle: root.querySelector("#add-escape-char"),
+    tool_collider_btn: root.querySelector("#tool-collider"),
     tool_move_btn: root.querySelector("#tool-move"),
     tool_paint_btn: root.querySelector("#tool-paint"),
     tool_rubber_btn: root.querySelector("#tool-rubber"),
@@ -149,6 +156,7 @@ function set_modal_close_visible(refs, visible) {
   refs.modal_close_btn.hidden = !visible;
 }
 function set_tool_ui(refs, tool) {
+  refs.tool_collider_btn.classList.toggle("active", tool === "collider");
   refs.tool_move_btn.classList.toggle("active", tool === "move");
   refs.tool_paint_btn.classList.toggle("active", tool === "paint");
   refs.tool_rubber_btn.classList.toggle("active", tool === "rubber");
@@ -318,6 +326,7 @@ function raw_scroll_to_camera(raw_metrics, viewport, visual_zoom) {
 // src/raw-format.ts
 var EMPTY_FLOOR = "___";
 var EMPTY_ENTITY = "   ";
+var COLLIDER_ENTITY = ":::";
 function normalize_glyph_3(token) {
   if (token.length === 3) {
     return token;
@@ -812,6 +821,11 @@ function handle_editor_shortcuts(ev, ctx, handlers) {
     handlers.set_tool("move");
     return;
   }
+  if (is_unmodified(ev, "c")) {
+    consume(ev);
+    handlers.set_tool("collider");
+    return;
+  }
   if (is_unmodified(ev, "p")) {
     consume(ev);
     handlers.set_tool("paint");
@@ -1162,9 +1176,11 @@ function grid_set(grid, x, y, cell) {
   if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) {
     return;
   }
+  const normalized_backup = typeof cell.entity_backup === "string" ? normalize_glyph(cell.entity_backup) : undefined;
   grid.cells[y][x] = {
     floor: normalize_glyph(cell.floor),
-    entity: normalize_glyph(cell.entity)
+    entity: normalize_glyph(cell.entity),
+    entity_backup: normalized_backup
   };
 }
 function is_empty_cell(cell) {
@@ -1235,6 +1251,7 @@ function apply_paint_at(grid, x, y, token) {
   const next = { ...cell };
   if (token.layer === "entity") {
     next.entity = token.token;
+    next.entity_backup = undefined;
   } else {
     next.floor = token.token;
   }
@@ -1253,13 +1270,44 @@ function apply_erase_at(grid, x, y) {
   }
   grid_set(grid, x, y, {
     floor: EMPTY_FLOOR,
-    entity: EMPTY_ENTITY
+    entity: EMPTY_ENTITY,
+    entity_backup: undefined
   });
 }
 function apply_erase_rect(grid, rect) {
   for (let y = rect.y;y < rect.y + rect.h; y++) {
     for (let x = rect.x;x < rect.x + rect.w; x++) {
       apply_erase_at(grid, x, y);
+    }
+  }
+}
+function apply_collider_at(grid, x, y) {
+  if (!in_bounds(grid, x, y)) {
+    return;
+  }
+  const cell = grid_get(grid, x, y);
+  if (!cell) {
+    return;
+  }
+  if (cell.entity === COLLIDER_ENTITY) {
+    const restored = typeof cell.entity_backup === "string" && cell.entity_backup !== EMPTY_ENTITY && cell.entity_backup !== COLLIDER_ENTITY ? cell.entity_backup : EMPTY_ENTITY;
+    grid_set(grid, x, y, {
+      ...cell,
+      entity: restored,
+      entity_backup: undefined
+    });
+    return;
+  }
+  grid_set(grid, x, y, {
+    ...cell,
+    entity: COLLIDER_ENTITY,
+    entity_backup: cell.entity
+  });
+}
+function apply_collider_rect(grid, rect) {
+  for (let y = rect.y;y < rect.y + rect.h; y++) {
+    for (let x = rect.x;x < rect.x + rect.w; x++) {
+      apply_collider_at(grid, x, y);
     }
   }
 }
@@ -1301,7 +1349,8 @@ function move_rect(grid, rect, delta_x, delta_y) {
       if (in_bounds(grid, src_x, src_y)) {
         grid_set(grid, src_x, src_y, {
           floor: EMPTY_FLOOR,
-          entity: EMPTY_ENTITY
+          entity: EMPTY_ENTITY,
+          entity_backup: undefined
         });
       }
     }
@@ -1444,8 +1493,11 @@ function entity_asset(grid, x, y, token_map2) {
   if (!cell) {
     return "";
   }
-  const tok = cell.entity;
-  if (tok === EMPTY_ENTITY) {
+  let tok = cell.entity;
+  if (tok === COLLIDER_ENTITY) {
+    tok = typeof cell.entity_backup === "string" ? cell.entity_backup : EMPTY_ENTITY;
+  }
+  if (tok === EMPTY_ENTITY || tok === COLLIDER_ENTITY) {
     return "";
   }
   const def = token_map2.get(tok);
@@ -1505,13 +1557,16 @@ function apply_cell_visual(el, x, y, grid, token_map2) {
   const data = resolve_cell_visual(grid, x, y, token_map2);
   const floor_img = el.querySelector(".tile-floor-img");
   const ent_img = el.querySelector(".tile-entity-img");
+  const collider_overlay = el.querySelector(".tile-collider-overlay");
   const floor_text = el.querySelector(".tile-floor-glyph");
   const ent_text = el.querySelector(".tile-entity-glyph");
   apply_image(floor_img, data.floor_asset, "fallback-floor");
   apply_image(ent_img, data.entity_asset, "hide");
+  const has_collider = data.entity_glyph === COLLIDER_ENTITY;
+  collider_overlay.style.display = has_collider ? "block" : "none";
   floor_text.textContent = data.floor_glyph;
-  ent_text.textContent = data.entity_glyph.trim();
-  ent_text.style.display = data.entity_glyph.trim() ? "inline-block" : "none";
+  ent_text.textContent = has_collider ? "" : data.entity_glyph.trim();
+  ent_text.style.display = !has_collider && data.entity_glyph.trim() ? "inline-block" : "none";
 }
 function create_cell(x, y) {
   const el = document.createElement("div");
@@ -1530,12 +1585,15 @@ function create_cell(x, y) {
   ent_img.className = "tile-entity-img";
   ent_img.alt = "";
   ent_img.draggable = false;
+  const collider_overlay = document.createElement("span");
+  collider_overlay.className = "tile-collider-overlay";
   const floor_text = document.createElement("span");
   floor_text.className = "tile-floor-glyph";
   const ent_text = document.createElement("span");
   ent_text.className = "tile-entity-glyph";
   el.appendChild(floor_img);
   el.appendChild(ent_img);
+  el.appendChild(collider_overlay);
   el.appendChild(floor_text);
   el.appendChild(ent_text);
   return el;
@@ -3033,6 +3091,18 @@ function on_visual_pointer_down(ev) {
     paint_preview_for_cell(null);
     return;
   }
+  if (state.tool === "collider") {
+    pointer_drag = {
+      kind: "collider_rect",
+      start_x: cell.x,
+      start_y: cell.y,
+      end_x: cell.x,
+      end_y: cell.y
+    };
+    const rect = normalize_rect(cell.x, cell.y, cell.x, cell.y);
+    visual.set_selection(rect);
+    return;
+  }
   if (state.tool === "rubber") {
     pointer_drag = {
       kind: "rubber_rect",
@@ -3107,6 +3177,15 @@ function on_visual_pointer_move(ev) {
     visual.set_selection(rect2);
     clear_move_preview();
     paint_preview_for_cell(null);
+    return;
+  }
+  if (pointer_drag.kind === "collider_rect") {
+    pointer_drag.end_x = cell.x;
+    pointer_drag.end_y = cell.y;
+    const rect2 = normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y);
+    visual.set_selection(rect2);
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
   if (pointer_drag.kind === "rubber_rect") {
@@ -3184,6 +3263,16 @@ function on_visual_pointer_up(ev) {
     visual.set_paint_preview(null);
     return;
   }
+  if (pointer_drag.kind === "collider_rect") {
+    const rect = normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y);
+    apply_collider_rect(state.grid, rect);
+    visual.set_selection(null);
+    pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
+    sync_grid_and_views();
+    return;
+  }
   if (pointer_drag.kind === "rubber_rect") {
     const rect = normalize_rect(pointer_drag.start_x, pointer_drag.start_y, pointer_drag.end_x, pointer_drag.end_y);
     apply_erase_rect(state.grid, rect);
@@ -3242,6 +3331,7 @@ function bind_events() {
   });
   refs.modal_close_btn.addEventListener("click", () => close_modal());
   refs.modal_backdrop.addEventListener("click", () => close_modal());
+  refs.tool_collider_btn.addEventListener("click", () => set_tool("collider"));
   refs.tool_move_btn.addEventListener("click", () => set_tool("move"));
   refs.tool_paint_btn.addEventListener("click", () => set_tool("paint"));
   refs.tool_rubber_btn.addEventListener("click", () => set_tool("rubber"));

@@ -1,3 +1,4 @@
+import * as Raw from "./raw-format";
 import type * as T from "./types";
 import * as Vr from "./vibimon-resolver";
 
@@ -69,15 +70,19 @@ function apply_cell_visual(
 
   const floor_img = el.querySelector(".tile-floor-img") as HTMLImageElement;
   const ent_img = el.querySelector(".tile-entity-img") as HTMLImageElement;
+  const collider_overlay = el.querySelector(".tile-collider-overlay") as HTMLSpanElement;
   const floor_text = el.querySelector(".tile-floor-glyph") as HTMLSpanElement;
   const ent_text = el.querySelector(".tile-entity-glyph") as HTMLSpanElement;
 
   apply_image(floor_img, data.floor_asset, "fallback-floor");
   apply_image(ent_img, data.entity_asset, "hide");
 
+  const has_collider = data.entity_glyph === Raw.COLLIDER_ENTITY;
+  collider_overlay.style.display = has_collider ? "block" : "none";
+
   floor_text.textContent = data.floor_glyph;
-  ent_text.textContent = data.entity_glyph.trim();
-  ent_text.style.display = data.entity_glyph.trim() ? "inline-block" : "none";
+  ent_text.textContent = has_collider ? "" : data.entity_glyph.trim();
+  ent_text.style.display = !has_collider && data.entity_glyph.trim() ? "inline-block" : "none";
 }
 
 function create_cell(x: number, y: number): HTMLDivElement {
@@ -100,6 +105,9 @@ function create_cell(x: number, y: number): HTMLDivElement {
   ent_img.alt = "";
   ent_img.draggable = false;
 
+  const collider_overlay = document.createElement("span");
+  collider_overlay.className = "tile-collider-overlay";
+
   const floor_text = document.createElement("span");
   floor_text.className = "tile-floor-glyph";
 
@@ -108,6 +116,7 @@ function create_cell(x: number, y: number): HTMLDivElement {
 
   el.appendChild(floor_img);
   el.appendChild(ent_img);
+  el.appendChild(collider_overlay);
   el.appendChild(floor_text);
   el.appendChild(ent_text);
 

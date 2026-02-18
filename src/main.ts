@@ -65,6 +65,13 @@ let pointer_drag:
       end_y: number;
     }
   | {
+      kind: "collider_rect";
+      start_x: number;
+      start_y: number;
+      end_x: number;
+      end_y: number;
+    }
+  | {
       kind: "rubber_rect";
       start_x: number;
       start_y: number;
@@ -1518,6 +1525,19 @@ function on_visual_pointer_down(ev: PointerEvent): void {
     return;
   }
 
+  if (state.tool === "collider") {
+    pointer_drag = {
+      kind: "collider_rect",
+      start_x: cell.x,
+      start_y: cell.y,
+      end_x: cell.x,
+      end_y: cell.y
+    };
+    const rect = St.normalize_rect(cell.x, cell.y, cell.x, cell.y);
+    visual.set_selection(rect);
+    return;
+  }
+
   if (state.tool === "rubber") {
     pointer_drag = {
       kind: "rubber_rect",
@@ -1605,6 +1625,21 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     visual.set_selection(rect);
     clear_move_preview();
     paint_preview_for_cell(null);
+    return;
+  }
+
+  if (pointer_drag.kind === "collider_rect") {
+    pointer_drag.end_x = cell.x;
+    pointer_drag.end_y = cell.y;
+    const rect = St.normalize_rect(
+      pointer_drag.start_x,
+      pointer_drag.start_y,
+      pointer_drag.end_x,
+      pointer_drag.end_y
+    );
+    visual.set_selection(rect);
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
 
@@ -1708,6 +1743,22 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     return;
   }
 
+  if (pointer_drag.kind === "collider_rect") {
+    const rect = St.normalize_rect(
+      pointer_drag.start_x,
+      pointer_drag.start_y,
+      pointer_drag.end_x,
+      pointer_drag.end_y
+    );
+    Tools.apply_collider_rect(state.grid, rect);
+    visual.set_selection(null);
+    pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
+    sync_grid_and_views();
+    return;
+  }
+
   if (pointer_drag.kind === "rubber_rect") {
     const rect = St.normalize_rect(
       pointer_drag.start_x,
@@ -1791,6 +1842,7 @@ function bind_events(): void {
   refs.modal_close_btn.addEventListener("click", () => close_modal());
   refs.modal_backdrop.addEventListener("click", () => close_modal());
 
+  refs.tool_collider_btn.addEventListener("click", () => set_tool("collider"));
   refs.tool_move_btn.addEventListener("click", () => set_tool("move"));
   refs.tool_paint_btn.addEventListener("click", () => set_tool("paint"));
   refs.tool_rubber_btn.addEventListener("click", () => set_tool("rubber"));
