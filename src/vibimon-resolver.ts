@@ -11,11 +11,18 @@ function sprite_id(name: string, ix: number, iy: number): string {
   return `${name}_${pad_x}_${pad_y}`;
 }
 
-function building_asset(name: string, ix: number, iy: number): string {
-  if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
+function bigimg_asset(def: T.GlyphToken, ix: number, iy: number): string {
+  if (def.single) {
+    return `${VIBIMON_ASSET_ROOT}/${def.name}.png`;
   }
-  return `${VIBIMON_ASSET_ROOT}/${sprite_id(name, ix, iy)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id(def.name, ix, iy)}.png`;
+}
+
+function entity_sprite_asset(sprite: string): string {
+  if (sprite.startsWith("ent_")) {
+    return `${VIBIMON_ASSET_ROOT}/${sprite}_front_stand.png`;
+  }
+  return `${VIBIMON_ASSET_ROOT}/${sprite}.png`;
 }
 
 function border_id(
@@ -116,7 +123,7 @@ function floor_asset(
     return "";
   }
 
-  if (def.kind === "bordered") {
+  if (def.kind === "borded") {
     const up = same_floor(grid, x, y - 1, tok);
     const dw = same_floor(grid, x, y + 1, tok);
     const lf = same_floor(grid, x - 1, y, tok);
@@ -129,17 +136,17 @@ function floor_asset(
     return `${VIBIMON_ASSET_ROOT}/${id}.png`;
   }
 
-  if (def.kind === "building") {
+  if (def.kind === "bigimg") {
     if (def.width > 1 || def.height > 1) {
       const [ox, oy] = top_left_of_block(grid, x, y, tok);
       const ix = (x - ox) % def.width;
       const iy = (y - oy) % def.height;
-      return building_asset(def.name, ix, iy);
+      return bigimg_asset(def, ix, iy);
     }
-    return building_asset(def.name, 0, 0);
+    return bigimg_asset(def, 0, 0);
   }
 
-  if (def.kind === "marker") {
+  if (def.kind === "none") {
     return DEFAULT_FLOOR_ASSET;
   }
 
@@ -156,15 +163,18 @@ function entity_asset(
   if (!cell) {
     return "";
   }
-  const tok = cell.entity;
-  if (tok === Raw.EMPTY_ENTITY) {
+  let tok = cell.entity;
+  if (tok === Raw.COLLIDER_ENTITY) {
+    tok = typeof cell.entity_backup === "string" ? cell.entity_backup : Raw.EMPTY_ENTITY;
+  }
+  if (tok === Raw.EMPTY_ENTITY || tok === Raw.COLLIDER_ENTITY) {
     return "";
   }
   const def = token_map.get(tok);
-  if (!def || def.kind !== "entity" || !def.sprite) {
+  if (!def || (def.kind !== "entity" && def.kind !== "player") || !def.sprite) {
     return "";
   }
-  return `${VIBIMON_ASSET_ROOT}/${def.sprite}_front_stand.png`;
+  return entity_sprite_asset(def.sprite);
 }
 
 export interface ResolvedCellVisual {

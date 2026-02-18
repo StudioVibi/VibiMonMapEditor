@@ -1,8 +1,12 @@
-export type Glyph2 = string;
+export type Glyph = string;
+
+export type GlyphKind = "none" | "bigimg" | "borded" | "entity" | "player";
+export type GlyphLayer = "floor" | "entity";
 
 export interface TileCell {
-  floor: Glyph2;
-  entity: Glyph2;
+  floor: Glyph;
+  entity: Glyph;
+  entity_backup?: Glyph;
 }
 
 export interface GridState {
@@ -11,7 +15,7 @@ export interface GridState {
   cells: TileCell[][];
 }
 
-export type Tool = "move" | "paint" | "rubber";
+export type Tool = "move" | "collider" | "paint" | "rubber";
 export type ViewMode = "raw" | "visual";
 
 export interface ViewportState {
@@ -35,6 +39,10 @@ export interface RawViewportState {
 }
 
 export interface SyncViewState {
+  enabled: boolean;
+}
+
+export interface AddEscapeCharState {
   enabled: boolean;
 }
 
@@ -66,15 +74,14 @@ export interface SelectionRect {
   h: number;
 }
 
-export type GlyphKind = "building" | "bordered" | "entity" | "marker";
-
 export interface GlyphToken {
-  token: Glyph2;
+  token: Glyph;
   kind: GlyphKind;
+  layer: GlyphLayer;
   name: string;
   width: number;
   height: number;
-  wall: boolean;
+  single: boolean;
   sprite: string | null;
   label: string;
 }
@@ -95,6 +102,7 @@ export interface EditorState {
   shared_camera: SharedCameraState;
   raw_viewport: RawViewportState;
   sync_view: SyncViewState;
+  add_escape_char: AddEscapeCharState;
   raw_text: string;
   raw_error: string | null;
   last_valid_grid: GridState;

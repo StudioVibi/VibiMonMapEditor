@@ -65,6 +65,13 @@ let pointer_drag:
       end_y: number;
     }
   | {
+      kind: "collider_rect";
+      start_x: number;
+      start_y: number;
+      end_x: number;
+      end_y: number;
+    }
+  | {
       kind: "rubber_rect";
       start_x: number;
       start_y: number;
@@ -118,28 +125,35 @@ function sprite_id(name: string, ix: number, iy: number): string {
   return `${name}_${pad_x}_${pad_y}`;
 }
 
-function building_preview_asset(name: string): string {
-  if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `${VIBIMON_ASSET_ROOT}/${name}.png`;
+function bigimg_preview_asset(token: T.GlyphToken): string {
+  if (token.single) {
+    return `${VIBIMON_ASSET_ROOT}/${token.name}.png`;
   }
-  return `${VIBIMON_ASSET_ROOT}/${sprite_id(name, 0, 0)}.png`;
+  return `${VIBIMON_ASSET_ROOT}/${sprite_id(token.name, 0, 0)}.png`;
+}
+
+function entity_preview_asset(sprite: string): string {
+  if (sprite.startsWith("ent_")) {
+    return `${VIBIMON_ASSET_ROOT}/${sprite}_front_stand.png`;
+  }
+  return `${VIBIMON_ASSET_ROOT}/${sprite}.png`;
 }
 
 function preview_asset(token: T.GlyphToken): string {
-  if (token.token === "::") {
+  if (token.token === Raw.EMPTY_FLOOR) {
     return DEFAULT_FLOOR_ASSET;
   }
 
-  if (token.kind === "entity" && token.sprite) {
-    return `${VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`;
+  if ((token.kind === "entity" || token.kind === "player") && token.sprite) {
+    return entity_preview_asset(token.sprite);
   }
 
-  if (token.kind === "bordered") {
+  if (token.kind === "borded") {
     return `${VIBIMON_ASSET_ROOT}/${token.name}_center.png`;
   }
 
-  if (token.kind === "building") {
-    return building_preview_asset(token.name);
+  if (token.kind === "bigimg") {
+    return bigimg_preview_asset(token);
   }
 
   return DEFAULT_FLOOR_ASSET;
@@ -192,6 +206,32 @@ function update_dirty_flag(): void {
   state.is_dirty = state.raw_text !== state.last_persisted_raw;
 }
 
+function escape_raw_for_typescript(raw: string): string {
+  return raw.replace(/\\/g, "\\\\");
+}
+
+function unescape_raw_from_typescript(raw: string): string {
+  return raw.replace(/\\\\/g, "\\");
+}
+
+function raw_for_textarea(raw: string): string {
+  if (!state.add_escape_char.enabled) {
+    return raw;
+  }
+  return escape_raw_for_typescript(raw);
+}
+
+function raw_from_textarea(raw: string): string {
+  if (!state.add_escape_char.enabled) {
+    return raw;
+  }
+  return unescape_raw_from_typescript(raw);
+}
+
+function sync_raw_textarea_with_state(): void {
+  refs.raw_textarea.value = raw_for_textarea(state.raw_text);
+}
+
 function refresh_interaction_ui(): void {
   refs.visual_stage.dataset.tool = state.tool;
   const blocked = state.mode === "visual" && state.tool === "paint" && !state.selected_token;
@@ -230,7 +270,7 @@ function sync_grid_and_views(): void {
   St.sync_raw_from_grid(state);
   update_dirty_flag();
   if (state.mode === "raw") {
-    refs.raw_textarea.value = state.raw_text;
+    sync_raw_textarea_with_state();
   }
   Dom.set_raw_error(refs, state.raw_error);
   refresh_status();
@@ -275,25 +315,40 @@ function raw_selection_range_for_tile(tile_x: number, tile_y: number): { start: 
   if (tile_x < 0 || tile_y < 0) {
     return null;
   }
-  const lines = state.raw_text.split("\n");
+  const raw_lines = state.raw_text.split("\n");
   const line_index = tile_y * 2 + 1;
-  if (line_index < 0 || line_index >= lines.length) {
+  if (line_index < 0 || line_index >= raw_lines.length) {
     return null;
   }
 
-  const line = lines[line_index];
+  const line = raw_lines[line_index];
   if (!line) {
     return null;
   }
 
-  const start_col = Math.max(0, Math.min(Math.max(0, line.length - 4), tile_x * 4));
-  let offset = 0;
-  for (let i = 0; i < line_index; i++) {
-    offset += lines[i].length + 1;
+  const tile_count = Math.floor(line.length / 4);
+  if (tile_count <= 0) {
+    return null;
   }
 
+  const target_tile = Math.max(0, Math.min(tile_count - 1, tile_x));
+  let start_col = 0;
+  for (let x = 0; x < target_tile; x++) {
+    const token = line.slice(x * 4, x * 4 + 3);
+    start_col += raw_for_textarea(token).length + 1;
+  }
+
+  const target_token = line.slice(target_tile * 4, target_tile * 4 + 3);
+  const cell_width = raw_for_textarea(target_token).length + 1;
+
+  let offset = 0;
+  for (let i = 0; i < line_index; i++) {
+    offset += raw_for_textarea(raw_lines[i]).length + 1;
+  }
+
+  const display_line = raw_for_textarea(line);
   const start = offset + start_col;
-  const end = Math.min(start + 4, offset + line.length);
+  const end = Math.min(start + cell_width, offset + display_line.length);
   if (end <= start) {
     return null;
   }
@@ -462,7 +517,7 @@ function apply_level_from_library(level_id: string): void {
   state.last_valid_grid = Raw.clone_grid(parsed.grid);
   state.raw_error = null;
   state.move_selection = null;
-  refs.raw_textarea.value = state.raw_text;
+  sync_raw_textarea_with_state();
   Dom.set_raw_error(refs, null);
   rebuild_visual();
 
@@ -1160,6 +1215,48 @@ function toggle_sync_view(): void {
   set_sync_view_enabled(!state.sync_view.enabled);
 }
 
+function set_add_escape_char_enabled(enabled: boolean): void {
+  if (state.add_escape_char.enabled === enabled) {
+    Dom.set_add_escape_char_ui(refs, enabled);
+    return;
+  }
+
+  let selection_start = 0;
+  let selection_end = 0;
+  let canonical_raw = state.raw_text;
+  if (state.mode === "raw") {
+    selection_start = refs.raw_textarea.selectionStart;
+    selection_end = refs.raw_textarea.selectionEnd;
+    canonical_raw = raw_from_textarea(refs.raw_textarea.value);
+  }
+
+  if (raw_timer !== null) {
+    window.clearTimeout(raw_timer);
+    raw_timer = null;
+  }
+
+  state.add_escape_char.enabled = enabled;
+  Dom.set_add_escape_char_ui(refs, enabled);
+
+  if (state.mode === "raw") {
+    St.sync_grid_from_raw(state, canonical_raw);
+    Dom.set_raw_error(refs, state.raw_error);
+    if (!state.raw_error) {
+      rebuild_visual();
+    }
+    sync_raw_textarea_with_state();
+    const max = refs.raw_textarea.value.length;
+    refs.raw_textarea.setSelectionRange(
+      Math.max(0, Math.min(max, selection_start)),
+      Math.max(0, Math.min(max, selection_end))
+    );
+    refs.raw_textarea.focus();
+  }
+
+  update_dirty_flag();
+  refresh_status();
+}
+
 function modal_is_open(): boolean {
   return state.modal_state.kind !== "none";
 }
@@ -1188,7 +1285,7 @@ function set_mode(mode: T.ViewMode): void {
   visual.set_paint_preview(null);
 
   if (mode === "raw") {
-    refs.raw_textarea.value = state.raw_text;
+    sync_raw_textarea_with_state();
     if (state.sync_view.enabled && from_mode === "visual") {
       apply_camera_to_raw();
     }
@@ -1428,6 +1525,19 @@ function on_visual_pointer_down(ev: PointerEvent): void {
     return;
   }
 
+  if (state.tool === "collider") {
+    pointer_drag = {
+      kind: "collider_rect",
+      start_x: cell.x,
+      start_y: cell.y,
+      end_x: cell.x,
+      end_y: cell.y
+    };
+    const rect = St.normalize_rect(cell.x, cell.y, cell.x, cell.y);
+    visual.set_selection(rect);
+    return;
+  }
+
   if (state.tool === "rubber") {
     pointer_drag = {
       kind: "rubber_rect",
@@ -1515,6 +1625,21 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     visual.set_selection(rect);
     clear_move_preview();
     paint_preview_for_cell(null);
+    return;
+  }
+
+  if (pointer_drag.kind === "collider_rect") {
+    pointer_drag.end_x = cell.x;
+    pointer_drag.end_y = cell.y;
+    const rect = St.normalize_rect(
+      pointer_drag.start_x,
+      pointer_drag.start_y,
+      pointer_drag.end_x,
+      pointer_drag.end_y
+    );
+    visual.set_selection(rect);
+    clear_move_preview();
+    visual.set_paint_preview(null);
     return;
   }
 
@@ -1618,6 +1743,22 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     return;
   }
 
+  if (pointer_drag.kind === "collider_rect") {
+    const rect = St.normalize_rect(
+      pointer_drag.start_x,
+      pointer_drag.start_y,
+      pointer_drag.end_x,
+      pointer_drag.end_y
+    );
+    Tools.apply_collider_rect(state.grid, rect);
+    visual.set_selection(null);
+    pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
+    sync_grid_and_views();
+    return;
+  }
+
   if (pointer_drag.kind === "rubber_rect") {
     const rect = St.normalize_rect(
       pointer_drag.start_x,
@@ -1695,9 +1836,13 @@ function bind_events(): void {
   refs.sync_view_toggle.addEventListener("change", () => {
     set_sync_view_enabled(refs.sync_view_toggle.checked);
   });
+  refs.add_escape_char_toggle.addEventListener("change", () => {
+    set_add_escape_char_enabled(refs.add_escape_char_toggle.checked);
+  });
   refs.modal_close_btn.addEventListener("click", () => close_modal());
   refs.modal_backdrop.addEventListener("click", () => close_modal());
 
+  refs.tool_collider_btn.addEventListener("click", () => set_tool("collider"));
   refs.tool_move_btn.addEventListener("click", () => set_tool("move"));
   refs.tool_paint_btn.addEventListener("click", () => set_tool("paint"));
   refs.tool_rubber_btn.addEventListener("click", () => set_tool("rubber"));
@@ -1708,12 +1853,13 @@ function bind_events(): void {
   });
 
   refs.raw_textarea.addEventListener("input", () => {
-    const val = refs.raw_textarea.value;
     if (raw_timer !== null) {
       window.clearTimeout(raw_timer);
     }
     raw_timer = window.setTimeout(() => {
-      St.sync_grid_from_raw(state, val);
+      raw_timer = null;
+      const canonical_raw = raw_from_textarea(refs.raw_textarea.value);
+      St.sync_grid_from_raw(state, canonical_raw);
       Dom.set_raw_error(refs, state.raw_error);
       if (!state.raw_error) {
         rebuild_visual();
@@ -1721,6 +1867,21 @@ function bind_events(): void {
       update_dirty_flag();
       refresh_status();
     }, raw_debounce_ms);
+  });
+  refs.raw_textarea.addEventListener("copy", (ev) => {
+    const start = refs.raw_textarea.selectionStart;
+    const end = refs.raw_textarea.selectionEnd;
+    if (start === end) {
+      return;
+    }
+    const clipboard = ev.clipboardData;
+    if (!clipboard) {
+      return;
+    }
+    ev.preventDefault();
+    const selected = refs.raw_textarea.value.slice(start, end);
+    clipboard.setData("text/plain", selected);
+    flash_status(state.add_escape_char.enabled ? "RAW copied with escape chars" : "RAW copied");
   });
   refs.raw_textarea.addEventListener("wheel", (ev) => {
     if (!ev.ctrlKey && !ev.metaKey) {
@@ -1866,7 +2027,7 @@ async function init_tokens(): Promise<void> {
 
   render_token_list();
 
-  const preferred = tokens.find((entry) => entry.token === "TT");
+  const preferred = tokens.find((entry) => entry.token === Raw.EMPTY_FLOOR);
   if (preferred) {
     select_token(preferred);
   } else if (tokens.length > 0) {
@@ -1881,9 +2042,10 @@ async function init_tokens(): Promise<void> {
 }
 
 function bootstrap(): void {
-  refs.raw_textarea.value = state.raw_text;
+  sync_raw_textarea_with_state();
   Dom.set_mode_ui(refs, state.mode);
   Dom.set_sync_view_ui(refs, state.sync_view.enabled);
+  Dom.set_add_escape_char_ui(refs, state.add_escape_char.enabled);
   Dom.set_tool_ui(refs, state.tool);
   Dom.set_modal_open(refs, false);
   Dom.set_modal_close_visible(refs, true);

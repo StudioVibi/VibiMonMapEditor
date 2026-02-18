@@ -1,3 +1,4 @@
+import * as Raw from "./raw-format";
 import type * as T from "./types";
 import * as Vr from "./vibimon-resolver";
 
@@ -69,15 +70,19 @@ function apply_cell_visual(
 
   const floor_img = el.querySelector(".tile-floor-img") as HTMLImageElement;
   const ent_img = el.querySelector(".tile-entity-img") as HTMLImageElement;
+  const collider_overlay = el.querySelector(".tile-collider-overlay") as HTMLSpanElement;
   const floor_text = el.querySelector(".tile-floor-glyph") as HTMLSpanElement;
   const ent_text = el.querySelector(".tile-entity-glyph") as HTMLSpanElement;
 
   apply_image(floor_img, data.floor_asset, "fallback-floor");
   apply_image(ent_img, data.entity_asset, "hide");
 
+  const has_collider = data.entity_glyph === Raw.COLLIDER_ENTITY;
+  collider_overlay.style.display = has_collider ? "block" : "none";
+
   floor_text.textContent = data.floor_glyph;
-  ent_text.textContent = data.entity_glyph.trim();
-  ent_text.style.display = data.entity_glyph.trim() ? "inline-block" : "none";
+  ent_text.textContent = has_collider ? "" : data.entity_glyph.trim();
+  ent_text.style.display = !has_collider && data.entity_glyph.trim() ? "inline-block" : "none";
 }
 
 function create_cell(x: number, y: number): HTMLDivElement {
@@ -100,6 +105,9 @@ function create_cell(x: number, y: number): HTMLDivElement {
   ent_img.alt = "";
   ent_img.draggable = false;
 
+  const collider_overlay = document.createElement("span");
+  collider_overlay.className = "tile-collider-overlay";
+
   const floor_text = document.createElement("span");
   floor_text.className = "tile-floor-glyph";
 
@@ -108,6 +116,7 @@ function create_cell(x: number, y: number): HTMLDivElement {
 
   el.appendChild(floor_img);
   el.appendChild(ent_img);
+  el.appendChild(collider_overlay);
   el.appendChild(floor_text);
   el.appendChild(ent_text);
 
@@ -120,11 +129,18 @@ function sprite_id(name: string, ix: number, iy: number): string {
   return `${name}_${pad_x}_${pad_y}`;
 }
 
-function building_asset(name: string, ix: number, iy: number): string {
-  if (name.startsWith("icon_") || name === "tile_mountain_door") {
-    return `${Vr.VIBIMON_ASSET_ROOT}/${name}.png`;
+function bigimg_asset(token: T.GlyphToken, ix: number, iy: number): string {
+  if (token.single) {
+    return `${Vr.VIBIMON_ASSET_ROOT}/${token.name}.png`;
   }
-  return `${Vr.VIBIMON_ASSET_ROOT}/${sprite_id(name, ix, iy)}.png`;
+  return `${Vr.VIBIMON_ASSET_ROOT}/${sprite_id(token.name, ix, iy)}.png`;
+}
+
+function entity_asset(sprite: string): string {
+  if (sprite.startsWith("ent_")) {
+    return `${Vr.VIBIMON_ASSET_ROOT}/${sprite}_front_stand.png`;
+  }
+  return `${Vr.VIBIMON_ASSET_ROOT}/${sprite}.png`;
 }
 
 export function create_visual_renderer(
@@ -340,25 +356,25 @@ export function create_visual_renderer(
         tile.style.width = `${TILE_SIZE}px`;
         tile.style.height = `${TILE_SIZE}px`;
 
-        if (token.kind === "entity" && token.sprite) {
+        if ((token.kind === "entity" || token.kind === "player") && token.sprite) {
           const entity = document.createElement("img");
           entity.className = "move-preview-entity";
           entity.alt = "";
-          apply_image(entity, `${Vr.VIBIMON_ASSET_ROOT}/${token.sprite}_front_stand.png`, "hide");
+          apply_image(entity, entity_asset(token.sprite), "hide");
           tile.appendChild(entity);
-        } else if (token.kind === "building") {
+        } else if (token.kind === "bigimg") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";
           apply_image(
             floor,
             token.width > 1 || token.height > 1
-              ? building_asset(token.name, ix, iy)
-              : building_asset(token.name, 0, 0),
+              ? bigimg_asset(token, ix, iy)
+              : bigimg_asset(token, 0, 0),
             "fallback-floor"
           );
           tile.appendChild(floor);
-        } else if (token.kind === "bordered") {
+        } else if (token.kind === "borded") {
           const floor = document.createElement("img");
           floor.className = "move-preview-floor";
           floor.alt = "";

@@ -240,6 +240,7 @@ body {
   padding-bottom: 28px;
 }
 
+#tool-collider::after,
 #tool-move::after,
 #tool-paint::after,
 #tool-rubber::after {
@@ -254,6 +255,11 @@ body {
   text-align: center;
   line-height: 1.3;
   text-transform: uppercase;
+}
+
+#tool-collider::after {
+  content: "Collider\A(C)";
+  white-space: pre;
 }
 
 #tool-move::after {
@@ -592,6 +598,13 @@ body {
   white-space: nowrap;
 }
 
+.visual-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
 .sync-toggle {
   display: inline-flex;
   align-items: center;
@@ -680,6 +693,11 @@ body {
   cursor: url("../assets/cursors/Pointer.svg") 4 4, crosshair;
 }
 
+.visual-stage[data-tool="collider"] {
+  cursor: url("../assets/cursors/collider.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
+    crosshair;
+}
+
 .visual-stage[data-tool="rubber"] {
   cursor: url("../assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
     not-allowed;
@@ -764,6 +782,16 @@ body {
 
 .tile-entity-img {
   z-index: 3;
+}
+
+.tile-collider-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  display: none;
+  background: rgba(220, 38, 38, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.9);
 }
 
 .tile-floor-glyph,

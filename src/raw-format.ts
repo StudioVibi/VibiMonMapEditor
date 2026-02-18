@@ -1,29 +1,45 @@
 import type * as T from "./types";
 
-export const EMPTY_FLOOR = "::";
-export const EMPTY_ENTITY = "  ";
+export const EMPTY_FLOOR = "___";
+export const EMPTY_ENTITY = "   ";
+export const COLLIDER_ENTITY = ":::";
 
-function parse_line(line: string): string[] {
-  let text = line;
-  if (text.length % 4 === 3) {
-    text += " ";
+function normalize_glyph_3(token: string): string {
+  if (token.length === 3) {
+    return token;
   }
+  if (token.length < 3) {
+    return token.padEnd(3, " ");
+  }
+  return token.slice(0, 3);
+}
+
+function parse_line(line: string):
+  | { ok: true; row: string[] }
+  | { ok: false; error: string } {
+  let text = line;
+  if (text.endsWith("\r")) {
+    text = text.slice(0, -1);
+  }
+  if (text.length === 0) {
+    return { ok: true, row: [] };
+  }
+  if (text.length % 4 !== 0) {
+    return { ok: false, error: "line width must be a multiple of 4." };
+  }
+
   const row: string[] = [];
   for (let i = 0; i < text.length; i += 4) {
     const cell = text.slice(i, i + 4);
-    row.push(cell.slice(1, 3));
+    if (cell.length !== 4 || cell[3] !== "|") {
+      return {
+        ok: false,
+        error: `invalid cell separator at column ${i + 4}.`
+      };
+    }
+    row.push(normalize_glyph_3(cell.slice(0, 3)));
   }
-  return row;
-}
-
-function ensure_glyph_2(token: string): string {
-  if (token.length === 2) {
-    return token;
-  }
-  if (token.length < 2) {
-    return token.padEnd(2, " ");
-  }
-  return token.slice(0, 2);
+  return { ok: true, row };
 }
 
 export function make_empty_grid(width: number, height: number): T.GridState {
@@ -53,8 +69,8 @@ export function serialize_raw(grid: T.GridState): string {
     let floor_line = "";
     for (let x = 0; x < grid.width; x++) {
       const cell = grid.cells[y][x];
-      entity_line += ` ${ensure_glyph_2(cell.entity)} `;
-      floor_line += ` ${ensure_glyph_2(cell.floor)} `;
+      entity_line += `${normalize_glyph_3(cell.entity)}|`;
+      floor_line += `${normalize_glyph_3(cell.floor)}|`;
     }
     lines.push(entity_line);
     lines.push(floor_line);
@@ -65,7 +81,10 @@ export function serialize_raw(grid: T.GridState): string {
 export function parse_raw(text: string):
   | { ok: true; grid: T.GridState }
   | { ok: false; error: string } {
-  const lines = text.split("\n");
+  const lines = text
+    .split("\n")
+    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line))
+    .filter((line) => line.trim().length > 0);
 
   if (lines.length === 0) {
     return { ok: false, error: "RAW is empty." };
@@ -79,8 +98,16 @@ export function parse_raw(text: string):
   const floor_rows: string[][] = [];
 
   for (let i = 0; i < lines.length; i += 2) {
-    const entity_row = parse_line(lines[i]);
-    const floor_row = parse_line(lines[i + 1]);
+    const entity_row_res = parse_line(lines[i]);
+    if (!entity_row_res.ok) {
+      return { ok: false, error: `Line ${i + 1}: ${entity_row_res.error}` };
+    }
+    const floor_row_res = parse_line(lines[i + 1]);
+    if (!floor_row_res.ok) {
+      return { ok: false, error: `Line ${i + 2}: ${floor_row_res.error}` };
+    }
+    const entity_row = entity_row_res.row;
+    const floor_row = floor_row_res.row;
     if (entity_row.length !== floor_row.length) {
       const line_no = i + 1;
       return {
@@ -108,8 +135,8 @@ export function parse_raw(text: string):
     const row: T.TileCell[] = [];
     for (let x = 0; x < width; x++) {
       row.push({
-        entity: ensure_glyph_2(entity_rows[y][x]),
-        floor: ensure_glyph_2(floor_rows[y][x])
+        entity: normalize_glyph_3(entity_rows[y][x]),
+        floor: normalize_glyph_3(floor_rows[y][x])
       });
     }
     cells.push(row);

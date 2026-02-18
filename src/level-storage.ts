@@ -1,6 +1,6 @@
 import type * as T from "./types";
 
-export const STORAGE_KEY = "vibimon_map_editor_levels_v1";
+export const STORAGE_KEY = "vibimon_map_editor_levels_v2";
 
 interface PersistedCollection {
   levels: T.PersistedLevel[];

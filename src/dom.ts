@@ -9,6 +9,8 @@ export interface DomRefs {
   mode_raw_btn: HTMLButtonElement;
   mode_visual_btn: HTMLButtonElement;
   sync_view_toggle: HTMLInputElement;
+  add_escape_char_toggle: HTMLInputElement;
+  tool_collider_btn: HTMLButtonElement;
   tool_move_btn: HTMLButtonElement;
   tool_paint_btn: HTMLButtonElement;
   tool_rubber_btn: HTMLButtonElement;
@@ -57,6 +59,12 @@ export function mount_app(root: HTMLElement): DomRefs {
       <main class="main-layout">
         <aside class="sidebar">
           <section class="tool-section">
+            <h2>Collider</h2>
+            <button id="tool-collider" class="tool-btn icon-only" type="button" aria-label="Collider tool" title="Collider">
+              <img src="assets/collider.svg" alt="" />
+            </button>
+          </section>
+          <section class="tool-section">
             <h2>Select/Move</h2>
             <button id="tool-move" class="tool-btn icon-only active" type="button" aria-label="Move tool" title="Move">
               <img src="assets/move.svg" alt="" />
@@ -84,11 +92,18 @@ export function mount_app(root: HTMLElement): DomRefs {
           <div id="visual-panel" class="panel visual-panel active">
             <div class="visual-toolbar">
               <span class="visual-toolbar-hints">Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
-              <label class="sync-toggle" for="sync-view">
-                <input id="sync-view" class="sync-toggle-input" type="checkbox" />
-                <span class="sync-toggle-track" aria-hidden="true"></span>
-                <span class="sync-toggle-text">Sync View <span class="sync-toggle-key">(S)</span></span>
-              </label>
+              <div class="visual-toolbar-actions">
+                <label class="sync-toggle" for="sync-view">
+                  <input id="sync-view" class="sync-toggle-input" type="checkbox" />
+                  <span class="sync-toggle-track" aria-hidden="true"></span>
+                  <span class="sync-toggle-text">Sync View <span class="sync-toggle-key">(S)</span></span>
+                </label>
+                <label class="sync-toggle" for="add-escape-char">
+                  <input id="add-escape-char" class="sync-toggle-input" type="checkbox" />
+                  <span class="sync-toggle-track" aria-hidden="true"></span>
+                  <span class="sync-toggle-text">Add Escape Char</span>
+                </label>
+              </div>
             </div>
             <div id="visual-stage" class="visual-stage">
               <div id="visual-grid" class="visual-grid"></div>
@@ -126,6 +141,8 @@ export function mount_app(root: HTMLElement): DomRefs {
     mode_raw_btn: root.querySelector("#mode-raw") as HTMLButtonElement,
     mode_visual_btn: root.querySelector("#mode-visual") as HTMLButtonElement,
     sync_view_toggle: root.querySelector("#sync-view") as HTMLInputElement,
+    add_escape_char_toggle: root.querySelector("#add-escape-char") as HTMLInputElement,
+    tool_collider_btn: root.querySelector("#tool-collider") as HTMLButtonElement,
     tool_move_btn: root.querySelector("#tool-move") as HTMLButtonElement,
     tool_paint_btn: root.querySelector("#tool-paint") as HTMLButtonElement,
     tool_rubber_btn: root.querySelector("#tool-rubber") as HTMLButtonElement,
@@ -161,6 +178,10 @@ export function set_sync_view_ui(refs: DomRefs, enabled: boolean): void {
   refs.sync_view_toggle.checked = enabled;
 }
 
+export function set_add_escape_char_ui(refs: DomRefs, enabled: boolean): void {
+  refs.add_escape_char_toggle.checked = enabled;
+}
+
 export function set_map_name(refs: DomRefs, name: string | null): void {
   refs.map_name.textContent = name || "";
 }
@@ -179,6 +200,7 @@ export function set_modal_close_visible(refs: DomRefs, visible: boolean): void {
 }
 
 export function set_tool_ui(refs: DomRefs, tool: T.Tool): void {
+  refs.tool_collider_btn.classList.toggle("active", tool === "collider");
   refs.tool_move_btn.classList.toggle("active", tool === "move");
   refs.tool_paint_btn.classList.toggle("active", tool === "paint");
   refs.tool_rubber_btn.classList.toggle("active", tool === "rubber");

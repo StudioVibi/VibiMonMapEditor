@@ -1,6 +1,16 @@
 import * as Raw from "./raw-format";
 import type * as T from "./types";
 
+function normalize_glyph(token: string): string {
+  if (token.length === 3) {
+    return token;
+  }
+  if (token.length < 3) {
+    return token.padEnd(3, " ");
+  }
+  return token.slice(0, 3);
+}
+
 export function create_initial_state(): T.EditorState {
   const grid = Raw.make_empty_grid(20, 20);
   const raw_text = Raw.serialize_raw(grid);
@@ -36,6 +46,9 @@ export function create_initial_state(): T.EditorState {
     sync_view: {
       enabled: false
     },
+    add_escape_char: {
+      enabled: false
+    },
     raw_text,
     raw_error: null,
     last_valid_grid: Raw.clone_grid(grid),
@@ -60,9 +73,12 @@ export function grid_set(grid: T.GridState, x: number, y: number, cell: T.TileCe
   if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) {
     return;
   }
+  const normalized_backup =
+    typeof cell.entity_backup === "string" ? normalize_glyph(cell.entity_backup) : undefined;
   grid.cells[y][x] = {
-    floor: cell.floor.padEnd(2, " ").slice(0, 2),
-    entity: cell.entity.padEnd(2, " ").slice(0, 2)
+    floor: normalize_glyph(cell.floor),
+    entity: normalize_glyph(cell.entity),
+    entity_backup: normalized_backup
   };
 }
 

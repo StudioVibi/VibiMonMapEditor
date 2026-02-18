@@ -16,7 +16,7 @@ export function apply_paint_at(
     return;
   }
 
-  if (token.kind === "building" && (token.width > 1 || token.height > 1)) {
+  if (token.kind === "bigimg" && (token.width > 1 || token.height > 1)) {
     for (let iy = 0; iy < token.height; iy++) {
       for (let ix = 0; ix < token.width; ix++) {
         const tx = x + ix;
@@ -41,8 +41,9 @@ export function apply_paint_at(
   }
 
   const next = { ...cell };
-  if (token.kind === "entity") {
+  if (token.layer === "entity") {
     next.entity = token.token;
+    next.entity_backup = undefined;
   } else {
     next.floor = token.token;
   }
@@ -67,7 +68,8 @@ export function apply_erase_at(grid: T.GridState, x: number, y: number): void {
   }
   St.grid_set(grid, x, y, {
     floor: Raw.EMPTY_FLOOR,
-    entity: Raw.EMPTY_ENTITY
+    entity: Raw.EMPTY_ENTITY,
+    entity_backup: undefined
   });
 }
 
@@ -75,6 +77,45 @@ export function apply_erase_rect(grid: T.GridState, rect: T.SelectionRect): void
   for (let y = rect.y; y < rect.y + rect.h; y++) {
     for (let x = rect.x; x < rect.x + rect.w; x++) {
       apply_erase_at(grid, x, y);
+    }
+  }
+}
+
+export function apply_collider_at(grid: T.GridState, x: number, y: number): void {
+  if (!in_bounds(grid, x, y)) {
+    return;
+  }
+  const cell = St.grid_get(grid, x, y);
+  if (!cell) {
+    return;
+  }
+
+  if (cell.entity === Raw.COLLIDER_ENTITY) {
+    const restored =
+      typeof cell.entity_backup === "string" &&
+      cell.entity_backup !== Raw.EMPTY_ENTITY &&
+      cell.entity_backup !== Raw.COLLIDER_ENTITY
+        ? cell.entity_backup
+        : Raw.EMPTY_ENTITY;
+    St.grid_set(grid, x, y, {
+      ...cell,
+      entity: restored,
+      entity_backup: undefined
+    });
+    return;
+  }
+
+  St.grid_set(grid, x, y, {
+    ...cell,
+    entity: Raw.COLLIDER_ENTITY,
+    entity_backup: cell.entity
+  });
+}
+
+export function apply_collider_rect(grid: T.GridState, rect: T.SelectionRect): void {
+  for (let y = rect.y; y < rect.y + rect.h; y++) {
+    for (let x = rect.x; x < rect.x + rect.w; x++) {
+      apply_collider_at(grid, x, y);
     }
   }
 }
@@ -132,7 +173,8 @@ export function move_rect(
       if (in_bounds(grid, src_x, src_y)) {
         St.grid_set(grid, src_x, src_y, {
           floor: Raw.EMPTY_FLOOR,
-          entity: Raw.EMPTY_ENTITY
+          entity: Raw.EMPTY_ENTITY,
+          entity_backup: undefined
         });
       }
     }
