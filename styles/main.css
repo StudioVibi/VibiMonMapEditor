@@ -592,6 +592,13 @@ body {
   white-space: nowrap;
 }
 
+.visual-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
 .sync-toggle {
   display: inline-flex;
   align-items: center;

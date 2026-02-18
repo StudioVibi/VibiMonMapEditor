@@ -203,6 +203,28 @@ function escape_raw_for_typescript(raw: string): string {
   return raw.replace(/\\/g, "\\\\");
 }
 
+function unescape_raw_from_typescript(raw: string): string {
+  return raw.replace(/\\\\/g, "\\");
+}
+
+function raw_for_textarea(raw: string): string {
+  if (!state.add_escape_char.enabled) {
+    return raw;
+  }
+  return escape_raw_for_typescript(raw);
+}
+
+function raw_from_textarea(raw: string): string {
+  if (!state.add_escape_char.enabled) {
+    return raw;
+  }
+  return unescape_raw_from_typescript(raw);
+}
+
+function sync_raw_textarea_with_state(): void {
+  refs.raw_textarea.value = raw_for_textarea(state.raw_text);
+}
+
 function refresh_interaction_ui(): void {
   refs.visual_stage.dataset.tool = state.tool;
   const blocked = state.mode === "visual" && state.tool === "paint" && !state.selected_token;
@@ -241,7 +263,7 @@ function sync_grid_and_views(): void {
   St.sync_raw_from_grid(state);
   update_dirty_flag();
   if (state.mode === "raw") {
-    refs.raw_textarea.value = state.raw_text;
+    sync_raw_textarea_with_state();
   }
   Dom.set_raw_error(refs, state.raw_error);
   refresh_status();
@@ -286,25 +308,40 @@ function raw_selection_range_for_tile(tile_x: number, tile_y: number): { start: 
   if (tile_x < 0 || tile_y < 0) {
     return null;
   }
-  const lines = state.raw_text.split("\n");
+  const raw_lines = state.raw_text.split("\n");
   const line_index = tile_y * 2 + 1;
-  if (line_index < 0 || line_index >= lines.length) {
+  if (line_index < 0 || line_index >= raw_lines.length) {
     return null;
   }
 
-  const line = lines[line_index];
+  const line = raw_lines[line_index];
   if (!line) {
     return null;
   }
 
-  const start_col = Math.max(0, Math.min(Math.max(0, line.length - 4), tile_x * 4));
-  let offset = 0;
-  for (let i = 0; i < line_index; i++) {
-    offset += lines[i].length + 1;
+  const tile_count = Math.floor(line.length / 4);
+  if (tile_count <= 0) {
+    return null;
   }
 
+  const target_tile = Math.max(0, Math.min(tile_count - 1, tile_x));
+  let start_col = 0;
+  for (let x = 0; x < target_tile; x++) {
+    const token = line.slice(x * 4, x * 4 + 3);
+    start_col += raw_for_textarea(token).length + 1;
+  }
+
+  const target_token = line.slice(target_tile * 4, target_tile * 4 + 3);
+  const cell_width = raw_for_textarea(target_token).length + 1;
+
+  let offset = 0;
+  for (let i = 0; i < line_index; i++) {
+    offset += raw_for_textarea(raw_lines[i]).length + 1;
+  }
+
+  const display_line = raw_for_textarea(line);
   const start = offset + start_col;
-  const end = Math.min(start + 4, offset + line.length);
+  const end = Math.min(start + cell_width, offset + display_line.length);
   if (end <= start) {
     return null;
   }
@@ -473,7 +510,7 @@ function apply_level_from_library(level_id: string): void {
   state.last_valid_grid = Raw.clone_grid(parsed.grid);
   state.raw_error = null;
   state.move_selection = null;
-  refs.raw_textarea.value = state.raw_text;
+  sync_raw_textarea_with_state();
   Dom.set_raw_error(refs, null);
   rebuild_visual();
 
@@ -1171,6 +1208,48 @@ function toggle_sync_view(): void {
   set_sync_view_enabled(!state.sync_view.enabled);
 }
 
+function set_add_escape_char_enabled(enabled: boolean): void {
+  if (state.add_escape_char.enabled === enabled) {
+    Dom.set_add_escape_char_ui(refs, enabled);
+    return;
+  }
+
+  let selection_start = 0;
+  let selection_end = 0;
+  let canonical_raw = state.raw_text;
+  if (state.mode === "raw") {
+    selection_start = refs.raw_textarea.selectionStart;
+    selection_end = refs.raw_textarea.selectionEnd;
+    canonical_raw = raw_from_textarea(refs.raw_textarea.value);
+  }
+
+  if (raw_timer !== null) {
+    window.clearTimeout(raw_timer);
+    raw_timer = null;
+  }
+
+  state.add_escape_char.enabled = enabled;
+  Dom.set_add_escape_char_ui(refs, enabled);
+
+  if (state.mode === "raw") {
+    St.sync_grid_from_raw(state, canonical_raw);
+    Dom.set_raw_error(refs, state.raw_error);
+    if (!state.raw_error) {
+      rebuild_visual();
+    }
+    sync_raw_textarea_with_state();
+    const max = refs.raw_textarea.value.length;
+    refs.raw_textarea.setSelectionRange(
+      Math.max(0, Math.min(max, selection_start)),
+      Math.max(0, Math.min(max, selection_end))
+    );
+    refs.raw_textarea.focus();
+  }
+
+  update_dirty_flag();
+  refresh_status();
+}
+
 function modal_is_open(): boolean {
   return state.modal_state.kind !== "none";
 }
@@ -1199,7 +1278,7 @@ function set_mode(mode: T.ViewMode): void {
   visual.set_paint_preview(null);
 
   if (mode === "raw") {
-    refs.raw_textarea.value = state.raw_text;
+    sync_raw_textarea_with_state();
     if (state.sync_view.enabled && from_mode === "visual") {
       apply_camera_to_raw();
     }
@@ -1706,6 +1785,9 @@ function bind_events(): void {
   refs.sync_view_toggle.addEventListener("change", () => {
     set_sync_view_enabled(refs.sync_view_toggle.checked);
   });
+  refs.add_escape_char_toggle.addEventListener("change", () => {
+    set_add_escape_char_enabled(refs.add_escape_char_toggle.checked);
+  });
   refs.modal_close_btn.addEventListener("click", () => close_modal());
   refs.modal_backdrop.addEventListener("click", () => close_modal());
 
@@ -1719,12 +1801,13 @@ function bind_events(): void {
   });
 
   refs.raw_textarea.addEventListener("input", () => {
-    const val = refs.raw_textarea.value;
     if (raw_timer !== null) {
       window.clearTimeout(raw_timer);
     }
     raw_timer = window.setTimeout(() => {
-      St.sync_grid_from_raw(state, val);
+      raw_timer = null;
+      const canonical_raw = raw_from_textarea(refs.raw_textarea.value);
+      St.sync_grid_from_raw(state, canonical_raw);
       Dom.set_raw_error(refs, state.raw_error);
       if (!state.raw_error) {
         rebuild_visual();
@@ -1745,8 +1828,8 @@ function bind_events(): void {
     }
     ev.preventDefault();
     const selected = refs.raw_textarea.value.slice(start, end);
-    clipboard.setData("text/plain", escape_raw_for_typescript(selected));
-    flash_status("RAW copied with TS escaping");
+    clipboard.setData("text/plain", selected);
+    flash_status(state.add_escape_char.enabled ? "RAW copied with escape chars" : "RAW copied");
   });
   refs.raw_textarea.addEventListener("wheel", (ev) => {
     if (!ev.ctrlKey && !ev.metaKey) {
@@ -1907,9 +1990,10 @@ async function init_tokens(): Promise<void> {
 }
 
 function bootstrap(): void {
-  refs.raw_textarea.value = state.raw_text;
+  sync_raw_textarea_with_state();
   Dom.set_mode_ui(refs, state.mode);
   Dom.set_sync_view_ui(refs, state.sync_view.enabled);
+  Dom.set_add_escape_char_ui(refs, state.add_escape_char.enabled);
   Dom.set_tool_ui(refs, state.tool);
   Dom.set_modal_open(refs, false);
   Dom.set_modal_close_visible(refs, true);

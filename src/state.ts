@@ -46,6 +46,9 @@ export function create_initial_state(): T.EditorState {
     sync_view: {
       enabled: false
     },
+    add_escape_char: {
+      enabled: false
+    },
     raw_text,
     raw_error: null,
     last_valid_grid: Raw.clone_grid(grid),

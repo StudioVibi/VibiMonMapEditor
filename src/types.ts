@@ -41,6 +41,10 @@ export interface SyncViewState {
   enabled: boolean;
 }
 
+export interface AddEscapeCharState {
+  enabled: boolean;
+}
+
 export interface PersistedLevel {
   id: string;
   name: string;
@@ -97,6 +101,7 @@ export interface EditorState {
   shared_camera: SharedCameraState;
   raw_viewport: RawViewportState;
   sync_view: SyncViewState;
+  add_escape_char: AddEscapeCharState;
   raw_text: string;
   raw_error: string | null;
   last_valid_grid: GridState;
