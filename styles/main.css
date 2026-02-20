@@ -241,6 +241,7 @@ body {
 }
 
 #tool-collider::after,
+#tool-door::after,
 #tool-move::after,
 #tool-paint::after,
 #tool-rubber::after {
@@ -259,6 +260,11 @@ body {
 
 #tool-collider::after {
   content: "Collider\A(C)";
+  white-space: pre;
+}
+
+#tool-door::after {
+  content: "Door\A(1)";
   white-space: pre;
 }
 
@@ -699,6 +705,10 @@ body {
     crosshair;
 }
 
+.visual-stage[data-tool="door"] {
+  cursor: url("../assets/cursors/door.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), crosshair;
+}
+
 .visual-stage[data-tool="rubber"] {
   cursor: url("../assets/cursors/Not-allowed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y),
     not-allowed;
@@ -788,11 +798,21 @@ body {
 .tile-collider-overlay {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 5;
   pointer-events: none;
   display: none;
   background: rgba(220, 38, 38, 0.3);
   box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.9);
+}
+
+.tile-door-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  display: none;
+  background: rgba(139, 92, 246, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.9);
 }
 
 .tile-floor-glyph,

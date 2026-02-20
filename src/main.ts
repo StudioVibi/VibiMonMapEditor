@@ -72,6 +72,13 @@ let pointer_drag:
       end_y: number;
     }
   | {
+      kind: "door_rect";
+      start_x: number;
+      start_y: number;
+      end_x: number;
+      end_y: number;
+    }
+  | {
       kind: "rubber_rect";
       start_x: number;
       start_y: number;
@@ -1400,6 +1407,9 @@ function render_token_list(): void {
   highlighted_glyph_index = -1;
   const q = token_filter.trim().toLowerCase();
   filtered_tokens = tokens.filter((entry) => {
+    if (entry.token === Raw.DOOR_ENTITY) {
+      return false;
+    }
     if (!q) {
       return true;
     }
@@ -1552,6 +1562,19 @@ function on_visual_pointer_down(ev: PointerEvent): void {
     return;
   }
 
+  if (state.tool === "door") {
+    pointer_drag = {
+      kind: "door_rect",
+      start_x: cell.x,
+      start_y: cell.y,
+      end_x: cell.x,
+      end_y: cell.y
+    };
+    const rect = St.normalize_rect(cell.x, cell.y, cell.x, cell.y);
+    visual.set_selection(rect);
+    return;
+  }
+
   if (state.tool === "rubber") {
     pointer_drag = {
       kind: "rubber_rect",
@@ -1657,6 +1680,21 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     return;
   }
 
+  if (pointer_drag.kind === "door_rect") {
+    pointer_drag.end_x = cell.x;
+    pointer_drag.end_y = cell.y;
+    const rect = St.normalize_rect(
+      pointer_drag.start_x,
+      pointer_drag.start_y,
+      pointer_drag.end_x,
+      pointer_drag.end_y
+    );
+    visual.set_selection(rect);
+    clear_move_preview();
+    visual.set_paint_preview(null);
+    return;
+  }
+
   if (pointer_drag.kind === "rubber_rect") {
     pointer_drag.end_x = cell.x;
     pointer_drag.end_y = cell.y;
@@ -1723,6 +1761,36 @@ function on_visual_pointer_move(ev: PointerEvent): void {
   visual.set_paint_preview(null);
 }
 
+function flash_door_result(result: Tools.DoorApplyResult): void {
+  const skipped = result.already + result.occupied;
+  if (skipped === 0) {
+    return;
+  }
+  if (result.applied > 0) {
+    flash_status(
+      `Door applied: ${result.applied}, skipped: ${skipped} (${result.already} already, ${result.occupied} occupied).`
+    );
+    return;
+  }
+  if (result.already > 0 && result.occupied === 0) {
+    flash_status(
+      result.already === 1
+        ? "Door already exists on this tile."
+        : "Door already exists on selected tiles."
+    );
+    return;
+  }
+  if (result.occupied > 0 && result.already === 0) {
+    flash_status(
+      result.occupied === 1
+        ? "Door can only be placed on an empty tile."
+        : "Door can only be placed on empty tiles."
+    );
+    return;
+  }
+  flash_status(`No door placed: ${result.already} already, ${result.occupied} occupied.`);
+}
+
 function on_visual_pointer_up(ev: PointerEvent): void {
   if (!pointer_drag) {
     return;
@@ -1770,6 +1838,23 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     clear_move_preview();
     visual.set_paint_preview(null);
     sync_grid_and_views();
+    return;
+  }
+
+  if (pointer_drag.kind === "door_rect") {
+    const rect = St.normalize_rect(
+      pointer_drag.start_x,
+      pointer_drag.start_y,
+      pointer_drag.end_x,
+      pointer_drag.end_y
+    );
+    const result = Tools.apply_door_rect(state.grid, rect);
+    visual.set_selection(null);
+    pointer_drag = null;
+    clear_move_preview();
+    visual.set_paint_preview(null);
+    sync_grid_and_views();
+    flash_door_result(result);
     return;
   }
 
@@ -1857,6 +1942,7 @@ function bind_events(): void {
   refs.modal_backdrop.addEventListener("click", () => close_modal());
 
   refs.tool_collider_btn.addEventListener("click", () => set_tool("collider"));
+  refs.tool_door_btn.addEventListener("click", () => set_tool("door"));
   refs.tool_move_btn.addEventListener("click", () => set_tool("move"));
   refs.tool_paint_btn.addEventListener("click", () => set_tool("paint"));
   refs.tool_rubber_btn.addEventListener("click", () => set_tool("rubber"));

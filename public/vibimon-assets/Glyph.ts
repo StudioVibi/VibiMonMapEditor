@@ -3,6 +3,7 @@ import * as Type from "../game/Type";
 
 export const table: Record<Type.Glyph, Type.GlyphFn> = {
   "   ": Glyph.none,
+  "DOR": Glyph.none,
   "___": Glyph.bigimg("tile_grass", 1, 1, false),
   ",,,": Glyph.bigimg("tile_bush", 1, 1, false),
   "_/\\": Glyph.bigimg("tile_tree_00_00", 3, 3, true),

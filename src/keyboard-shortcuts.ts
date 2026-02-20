@@ -85,6 +85,11 @@ function handle_editor_shortcuts(ev: KeyboardEvent, ctx: ShortcutContext, handle
     handlers.set_tool("collider");
     return;
   }
+  if (is_unmodified(ev, "1")) {
+    consume(ev);
+    handlers.set_tool("door");
+    return;
+  }
   if (is_unmodified(ev, "p")) {
     consume(ev);
     handlers.set_tool("paint");

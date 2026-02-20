@@ -11,6 +11,7 @@ export interface DomRefs {
   sync_view_toggle: HTMLInputElement;
   add_escape_char_toggle: HTMLInputElement;
   tool_collider_btn: HTMLButtonElement;
+  tool_door_btn: HTMLButtonElement;
   tool_move_btn: HTMLButtonElement;
   tool_paint_btn: HTMLButtonElement;
   tool_rubber_btn: HTMLButtonElement;
@@ -62,6 +63,12 @@ export function mount_app(root: HTMLElement): DomRefs {
             <h2>Collider</h2>
             <button id="tool-collider" class="tool-btn icon-only" type="button" aria-label="Collider tool" title="Collider">
               <img src="assets/collider.svg" alt="" />
+            </button>
+          </section>
+          <section class="tool-section">
+            <h2>Events</h2>
+            <button id="tool-door" class="tool-btn icon-only" type="button" aria-label="Door tool" title="Door">
+              <img src="assets/door.svg" alt="" />
             </button>
           </section>
           <section class="tool-section">
@@ -143,6 +150,7 @@ export function mount_app(root: HTMLElement): DomRefs {
     sync_view_toggle: root.querySelector("#sync-view") as HTMLInputElement,
     add_escape_char_toggle: root.querySelector("#add-escape-char") as HTMLInputElement,
     tool_collider_btn: root.querySelector("#tool-collider") as HTMLButtonElement,
+    tool_door_btn: root.querySelector("#tool-door") as HTMLButtonElement,
     tool_move_btn: root.querySelector("#tool-move") as HTMLButtonElement,
     tool_paint_btn: root.querySelector("#tool-paint") as HTMLButtonElement,
     tool_rubber_btn: root.querySelector("#tool-rubber") as HTMLButtonElement,
@@ -201,6 +209,7 @@ export function set_modal_close_visible(refs: DomRefs, visible: boolean): void {
 
 export function set_tool_ui(refs: DomRefs, tool: T.Tool): void {
   refs.tool_collider_btn.classList.toggle("active", tool === "collider");
+  refs.tool_door_btn.classList.toggle("active", tool === "door");
   refs.tool_move_btn.classList.toggle("active", tool === "move");
   refs.tool_paint_btn.classList.toggle("active", tool === "paint");
   refs.tool_rubber_btn.classList.toggle("active", tool === "rubber");

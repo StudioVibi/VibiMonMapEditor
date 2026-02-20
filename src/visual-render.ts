@@ -70,12 +70,16 @@ function apply_cell_visual(
 
   const floor_img = el.querySelector(".tile-floor-img") as HTMLImageElement;
   const ent_img = el.querySelector(".tile-entity-img") as HTMLImageElement;
+  const door_overlay = el.querySelector(".tile-door-overlay") as HTMLSpanElement;
   const collider_overlay = el.querySelector(".tile-collider-overlay") as HTMLSpanElement;
   const floor_text = el.querySelector(".tile-floor-glyph") as HTMLSpanElement;
   const ent_text = el.querySelector(".tile-entity-glyph") as HTMLSpanElement;
 
   apply_image(floor_img, data.floor_asset, "fallback-floor");
   apply_image(ent_img, data.entity_asset, "hide");
+
+  const has_door = data.entity_glyph === Raw.DOOR_ENTITY;
+  door_overlay.style.display = has_door ? "block" : "none";
 
   const has_collider = data.entity_glyph === Raw.COLLIDER_ENTITY;
   collider_overlay.style.display = has_collider ? "block" : "none";
@@ -105,6 +109,9 @@ function create_cell(x: number, y: number): HTMLDivElement {
   ent_img.alt = "";
   ent_img.draggable = false;
 
+  const door_overlay = document.createElement("span");
+  door_overlay.className = "tile-door-overlay";
+
   const collider_overlay = document.createElement("span");
   collider_overlay.className = "tile-collider-overlay";
 
@@ -116,6 +123,7 @@ function create_cell(x: number, y: number): HTMLDivElement {
 
   el.appendChild(floor_img);
   el.appendChild(ent_img);
+  el.appendChild(door_overlay);
   el.appendChild(collider_overlay);
   el.appendChild(floor_text);
   el.appendChild(ent_text);

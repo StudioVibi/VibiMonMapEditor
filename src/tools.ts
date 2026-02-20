@@ -120,6 +120,56 @@ export function apply_collider_rect(grid: T.GridState, rect: T.SelectionRect): v
   }
 }
 
+export type DoorApplyStatus = "applied" | "already" | "occupied";
+
+export interface DoorApplyResult {
+  applied: number;
+  already: number;
+  occupied: number;
+}
+
+export function apply_door_at(grid: T.GridState, x: number, y: number): DoorApplyStatus {
+  if (!in_bounds(grid, x, y)) {
+    return "occupied";
+  }
+  const cell = St.grid_get(grid, x, y);
+  if (!cell) {
+    return "occupied";
+  }
+
+  if (cell.entity === Raw.DOOR_ENTITY) {
+    return "already";
+  }
+
+  if (cell.entity !== Raw.EMPTY_ENTITY) {
+    return "occupied";
+  }
+
+  St.grid_set(grid, x, y, {
+    ...cell,
+    entity: Raw.DOOR_ENTITY,
+    entity_backup: undefined
+  });
+  return "applied";
+}
+
+export function apply_door_rect(grid: T.GridState, rect: T.SelectionRect): DoorApplyResult {
+  const out: DoorApplyResult = { applied: 0, already: 0, occupied: 0 };
+  for (let y = rect.y; y < rect.y + rect.h; y++) {
+    for (let x = rect.x; x < rect.x + rect.w; x++) {
+      const status = apply_door_at(grid, x, y);
+      if (status === "applied") {
+        out.applied += 1;
+      } else if (status === "already") {
+        out.already += 1;
+      } else {
+        out.occupied += 1;
+      }
+    }
+  }
+  return out;
+}
+
 export function move_single_cell(
   grid: T.GridState,
   from_x: number,

@@ -15,7 +15,7 @@ export interface GridState {
   cells: TileCell[][];
 }
 
-export type Tool = "move" | "collider" | "paint" | "rubber";
+export type Tool = "move" | "collider" | "door" | "paint" | "rubber";
 export type ViewMode = "raw" | "visual";
 
 export interface ViewportState {
