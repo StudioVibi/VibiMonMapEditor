@@ -87,6 +87,7 @@ body {
 
 .topbar-col-main {
   min-width: 0;
+  border-right: 0;
 }
 
 .project-title {
@@ -1139,6 +1140,20 @@ body {
   font-size: 12px;
 }
 
+.modal-loading {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--ios-text-secondary);
+  font-size: 13px;
+}
+
+.modal-inline-status {
+  margin: 0;
+  color: var(--ios-text-secondary);
+  font-size: 12px;
+}
+
 .confirm-copy {
   margin: 0 0 12px;
   color: var(--ios-text-primary);
@@ -1173,6 +1188,12 @@ body {
 
 .modal-btn:active {
   transform: translateY(0);
+}
+
+.modal-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .modal-btn.primary {
@@ -1282,6 +1303,10 @@ body {
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--ios-accent) 40%, transparent),
     var(--ios-shadow-soft);
+}
+
+.status-warn {
+  color: var(--ios-warning, #9a6800);
 }
 
 .level-preview-frame {

@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: VibiMon Map Editor - Serverless levels API (DynamoDB + Cognito + Lambda)
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures:
+      - arm64
+    Timeout: 15
+    MemorySize: 256
+    Tracing: Active
+
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+  TableName:
+    Type: String
+    Default: vibimon_levels
+  CorsAllowOrigin:
+    Type: String
+    Default: "*"
+  RequireAuth:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+  RequiredGroup:
+    Type: String
+    Default: map-admin
+
+Conditions:
+  UseAuth: !Equals [!Ref RequireAuth, "true"]
+
+Resources:
+  LevelsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: scope
+          AttributeType: S
+        - AttributeName: updated_sort
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: scope-updated-index
+          KeySchema:
+            - AttributeName: scope
+              KeyType: HASH
+            - AttributeName: updated_sort
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub vibimon-map-editor-${StageName}
+      MfaConfiguration: "OFF"
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub vibimon-map-editor-client-${StageName}
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlowsUserPoolClient: false
+
+  CognitoMapAdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: !Ref RequiredGroup
+      UserPoolId: !Ref CognitoUserPool
+      Description: Users allowed to access map editor storage API.
+
+  LevelsApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref StageName
+      CorsConfiguration:
+        AllowHeaders:
+          - authorization
+          - content-type
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+        AllowOrigins:
+          - !Ref CorsAllowOrigin
+      Auth: !If
+        - UseAuth
+        - DefaultAuthorizer: CognitoJwtAuthorizer
+          Authorizers:
+            CognitoJwtAuthorizer:
+              JwtConfiguration:
+                issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}
+                audience:
+                  - !Ref CognitoUserPoolClient
+              IdentitySource: "$request.header.Authorization"
+        - !Ref AWS::NoValue
+
+  LevelsApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub vibimon-levels-api-${StageName}
+      CodeUri: src/
+      Handler: handler.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref LevelsTable
+          UPDATED_INDEX_NAME: scope-updated-index
+          CORS_ALLOW_ORIGIN: !Ref CorsAllowOrigin
+          REQUIRE_AUTH: !Ref RequireAuth
+          REQUIRED_GROUP: !Ref RequiredGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LevelsTable
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LevelsApi
+            Method: GET
+            Path: /health
+            Auth:
+              Authorizer: NONE
+        ListLevels:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LevelsApi
+            Method: GET
+            Path: /levels
+        CreateLevel:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LevelsApi
+            Method: POST
+            Path: /levels
+        GetLevel:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LevelsApi
+            Method: GET
+            Path: /levels/{id}
+        PutLevel:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LevelsApi
+            Method: PUT
+            Path: /levels/{id}
+        PatchLevelName:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LevelsApi
+            Method: PATCH
+            Path: /levels/{id}/name
+        DeleteLevel:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LevelsApi
+            Method: DELETE
+            Path: /levels/{id}
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - handler.ts
+        Minify: true
+        Target: es2022
+        Sourcemap: true
+
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub vibimon-levels-api-5xx-${StageName}
+      AlarmDescription: HTTP API 5xx errors are above threshold.
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref LevelsApi
+        - Name: Stage
+          Value: !Ref StageName
+
+  LambdaThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub vibimon-levels-lambda-throttles-${StageName}
+      AlarmDescription: Lambda throttles are above threshold.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref LevelsApiFunction
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL for the levels API.
+    Value: !Sub https://${LevelsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  LevelsTableName:
+    Description: DynamoDB table name.
+    Value: !Ref LevelsTable
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID.
+    Value: !Ref CognitoUserPool
+  CognitoUserPoolClientId:
+    Description: Cognito App Client ID.
+    Value: !Ref CognitoUserPoolClient
+  CognitoRequiredGroup:
+    Description: Group required by the API for admin access.
+    Value: !Ref RequiredGroup

@@ -54,6 +54,8 @@ export interface PersistedLevel {
   grid_height: number;
   created_at: string;
   updated_at: string;
+  version: number;
+  source?: "cloud" | "local";
 }
 
 export type LevelSortMode = "recent" | "name";
@@ -94,6 +96,7 @@ export interface EditorState {
   selected_token: GlyphToken | null;
   current_level_id: string | null;
   current_level_name: string | null;
+  current_level_version: number | null;
   last_persisted_raw: string;
   is_dirty: boolean;
   level_sort_mode: LevelSortMode;

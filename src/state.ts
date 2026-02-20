@@ -22,6 +22,7 @@ export function create_initial_state(): T.EditorState {
     selected_token: null,
     current_level_id: null,
     current_level_name: null,
+    current_level_version: null,
     last_persisted_raw: raw_text,
     is_dirty: false,
     level_sort_mode: "recent",

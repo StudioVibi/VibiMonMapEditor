@@ -47,6 +47,9 @@ let load_selected_level_id: string | null = null;
 let modal_error_text = "";
 let status_flash_text: string | null = null;
 let status_flash_timer: number | null = null;
+let modal_busy = false;
+let modal_busy_text = "";
+let modal_render_epoch = 0;
 
 let pointer_drag:
   | null
@@ -165,6 +168,12 @@ function refresh_status(): void {
     return;
   }
 
+  const storage = Store.storage_runtime_info();
+  const storage_label = storage.mode.toUpperCase();
+  const storage_html = storage.last_cloud_error
+    ? `Storage: <span class="status-warn">${escape_html(storage_label)}</span>`
+    : `Storage: ${escape_html(storage_label)}`;
+
   let level_html = `<span class="status-unsaved">(unsaved)</span>`;
   if (state.current_level_name) {
     level_html = state.is_dirty
@@ -177,11 +186,10 @@ function refresh_status(): void {
     `Mode: ${state.mode.toUpperCase()}`,
     `Sync: ${state.sync_view.enabled ? "ON" : "OFF"}`,
     `Tool: ${state.tool}`,
-    `Grid: ${state.grid.width}x${state.grid.height}`
+    `Grid: ${state.grid.width}x${state.grid.height}`,
+    storage_html
   ];
-  const html = segments
-    .map((segment, idx) => (idx === 0 ? segment : escape_html(segment)))
-    .join(' <span class="status-sep">|</span> ');
+  const html = segments.join(' <span class="status-sep">|</span> ');
   Dom.set_status_html(refs, html);
 }
 
@@ -416,16 +424,38 @@ function sorted_levels(levels: T.PersistedLevel[]): T.PersistedLevel[] {
 
 function set_modal_state(next: T.ModalState): void {
   state.modal_state = next;
+  modal_render_epoch += 1;
   render_modal();
+}
+
+function next_modal_render_epoch(): number {
+  modal_render_epoch += 1;
+  return modal_render_epoch;
+}
+
+function is_modal_render_active(expected_kind: T.ModalState["kind"], epoch: number): boolean {
+  return modal_render_epoch === epoch && state.modal_state.kind === expected_kind;
+}
+
+function set_modal_busy(busy: boolean, text = ""): void {
+  modal_busy = busy;
+  modal_busy_text = text;
+  if (modal_is_open()) {
+    render_modal();
+  }
 }
 
 function close_modal(): void {
   modal_error_text = "";
+  modal_busy = false;
+  modal_busy_text = "";
   set_modal_state({ kind: "none" });
 }
 
 function open_save_modal(mode: T.SaveModalMode, error_text = ""): void {
   modal_error_text = error_text;
+  modal_busy = false;
+  modal_busy_text = "";
   set_modal_state({ kind: "save", mode });
 }
 
@@ -437,53 +467,64 @@ function open_load_modal(reset_search = true): void {
     load_selected_level_id = state.current_level_id;
   }
   modal_error_text = "";
+  modal_busy = false;
+  modal_busy_text = "";
   set_modal_state({ kind: "load" });
 }
 
 function set_saved_level_state(level: T.PersistedLevel): void {
   state.current_level_id = level.id;
   state.current_level_name = level.name;
+  state.current_level_version = level.version;
   state.last_persisted_raw = state.raw_text;
   update_dirty_flag();
   refresh_map_name();
   refresh_status();
 }
 
-function persist_level(name: string, id: string | null): T.PersistedLevel {
+async function persist_level(name: string, id: string | null): Promise<T.PersistedLevel> {
   const parsed = Raw.parse_raw(state.raw_text);
   const width = parsed.ok ? parsed.grid.width : state.grid.width;
   const height = parsed.ok ? parsed.grid.height : state.grid.height;
-  return Store.save_level({
+  return await Store.save_level({
     id,
     name,
     raw_text: state.raw_text,
     grid_width: width,
-    grid_height: height
+    grid_height: height,
+    version: id ? state.current_level_version : null
   });
 }
 
-function save_current_level(name: string, mode: T.SaveModalMode): void {
+async function save_current_level(name: string, mode: T.SaveModalMode): Promise<void> {
+  if (modal_busy) {
+    return;
+  }
+  set_modal_busy(true, "Saving...");
   try {
     const target_id = mode === "save-as" ? null : state.current_level_id;
-    const saved = persist_level(name, target_id);
+    const saved = await persist_level(name, target_id);
     set_saved_level_state(saved);
+    modal_busy = false;
+    modal_busy_text = "";
     close_modal();
     const prefix = mode === "save-as" ? "Saved as" : "Saved";
     flash_status(`${prefix}: ${saved.name}`);
   } catch (err) {
+    set_modal_busy(false);
     modal_error_text = `Save failed: ${String(err)}`;
     render_modal();
   }
 }
 
-function quick_save_current_level(): void {
+async function quick_save_current_level(): Promise<void> {
   if (!state.current_level_id || !state.current_level_name) {
     open_save_modal("regular");
     return;
   }
 
   try {
-    const saved = persist_level(state.current_level_name, state.current_level_id);
+    const saved = await persist_level(state.current_level_name, state.current_level_id);
     set_saved_level_state(saved);
     flash_status(`Saved: ${saved.name}`);
   } catch (err) {
@@ -491,9 +532,9 @@ function quick_save_current_level(): void {
   }
 }
 
-function request_save_action(): void {
+async function request_save_action(): Promise<void> {
   if (state.current_level_id) {
-    quick_save_current_level();
+    await quick_save_current_level();
     return;
   }
   open_save_modal("regular");
@@ -503,18 +544,18 @@ function request_save_as_action(): void {
   open_save_modal("save-as");
 }
 
-function find_level(level_id: string): T.PersistedLevel | null {
+async function find_level(level_id: string): Promise<T.PersistedLevel | null> {
   try {
-    return Store.get_level(level_id);
+    return await Store.get_level(level_id);
   } catch {
     return null;
   }
 }
 
-function apply_level_from_library(level_id: string): void {
-  const level = find_level(level_id);
+async function apply_level_from_library(level_id: string): Promise<void> {
+  const level = await find_level(level_id);
   if (!level) {
-    modal_error_text = "Level not found in local storage.";
+    modal_error_text = "Level not found.";
     render_modal();
     return;
   }
@@ -537,6 +578,7 @@ function apply_level_from_library(level_id: string): void {
 
   state.current_level_id = level.id;
   state.current_level_name = level.name;
+  state.current_level_version = level.version;
   state.last_persisted_raw = state.raw_text;
   update_dirty_flag();
   refresh_map_name();
@@ -554,7 +596,7 @@ function request_level_load(level_id: string): void {
     set_modal_state({ kind: "confirm-discard", level_id });
     return;
   }
-  apply_level_from_library(level_id);
+  void apply_level_from_library(level_id);
 }
 
 function preview_img(src: string, fallback_to_floor: boolean): HTMLImageElement {
@@ -709,7 +751,11 @@ function create_level_card(level: T.PersistedLevel): HTMLDivElement {
   load_btn.type = "button";
   load_btn.className = "modal-btn primary";
   load_btn.textContent = "Load";
+  load_btn.disabled = modal_busy;
   load_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
     load_selected_level_id = level.id;
     refresh_load_selection_ui();
     request_level_load(level.id);
@@ -720,7 +766,11 @@ function create_level_card(level: T.PersistedLevel): HTMLDivElement {
   rename_btn.type = "button";
   rename_btn.className = "modal-btn";
   rename_btn.textContent = "Rename";
+  rename_btn.disabled = modal_busy;
   rename_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
     modal_error_text = "";
     set_modal_state({ kind: "rename", level_id: level.id });
   });
@@ -730,7 +780,11 @@ function create_level_card(level: T.PersistedLevel): HTMLDivElement {
   delete_btn.type = "button";
   delete_btn.className = "modal-btn danger";
   delete_btn.textContent = "Delete";
+  delete_btn.disabled = modal_busy;
   delete_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
     modal_error_text = "";
     set_modal_state({ kind: "confirm-delete", level_id: level.id });
   });
@@ -751,23 +805,48 @@ function create_level_card(level: T.PersistedLevel): HTMLDivElement {
   return card;
 }
 
-function render_save_modal(): void {
+async function render_save_modal(): Promise<void> {
   if (state.modal_state.kind !== "save") {
     return;
   }
 
   const save_mode = state.modal_state.mode;
   const is_save_as = save_mode === "save-as";
+  const render_epoch = next_modal_render_epoch();
   Dom.set_modal_title(refs, is_save_as ? "Save As New" : "Save Level");
+  refs.modal_body.innerHTML = `<div class="modal-loading">Loading saved levels...</div>`;
+
+  const base_help = is_save_as
+    ? "Save As creates a new level, keeping the current one."
+    : "Save updates the current level when it already exists.";
+
+  let existing_levels: T.PersistedLevel[] = [];
+  let help_text = modal_error_text || base_help;
+  let help_is_error = !!modal_error_text;
+
+  try {
+    existing_levels = sorted_levels(await Store.list_levels());
+  } catch (err) {
+    if (!help_is_error) {
+      help_text = `Could not list saved levels: ${String(err)}`;
+      help_is_error = true;
+    }
+  }
+
+  if (!is_modal_render_active("save", render_epoch)) {
+    return;
+  }
+
   refs.modal_body.innerHTML = `
     <div class="save-layout">
       <form id="save-form" class="modal-form save-form">
         <label class="modal-field-label" for="save-level-name">Level Name</label>
-        <input id="save-level-name" class="modal-input" type="text" maxlength="80" />
+        <input id="save-level-name" class="modal-input" type="text" maxlength="80" ${modal_busy ? "disabled" : ""} />
         <p id="save-help" class="modal-help"></p>
+        ${modal_busy ? `<p class="modal-inline-status">${escape_html(modal_busy_text || "Working...")}</p>` : ""}
         <div class="modal-actions">
-          <button id="save-cancel" class="modal-btn" type="button">Cancel</button>
-          <button class="modal-btn primary" type="submit">${is_save_as ? "Save As" : "Save"}</button>
+          <button id="save-cancel" class="modal-btn" type="button" ${modal_busy ? "disabled" : ""}>Cancel</button>
+          <button class="modal-btn primary" type="submit" ${modal_busy ? "disabled" : ""}>${is_save_as ? "Save As" : "Save"}</button>
         </div>
       </form>
       <section class="save-existing-pane" aria-label="Existing levels">
@@ -782,27 +861,14 @@ function render_save_modal(): void {
   const help_el = refs.modal_body.querySelector("#save-help") as HTMLParagraphElement;
   const cancel_btn = refs.modal_body.querySelector("#save-cancel") as HTMLButtonElement;
   const existing_list = refs.modal_body.querySelector("#save-existing-list") as HTMLDivElement;
-  const base_help = is_save_as
-    ? "Save As creates a new local level, keeping the current one."
-    : "Save will update the current level when it already exists.";
-
-  let help_text = modal_error_text || base_help;
-  let help_is_error = !!modal_error_text;
-  let existing_levels: T.PersistedLevel[] = [];
-  try {
-    existing_levels = sorted_levels(Store.list_levels());
-  } catch (err) {
-    if (!help_is_error) {
-      help_text = `Could not list saved levels: ${String(err)}`;
-      help_is_error = true;
-    }
-  }
 
   help_el.textContent = help_text;
   help_el.classList.toggle("error", help_is_error);
   name_input.value = state.current_level_name || "";
-  name_input.focus();
-  name_input.select();
+  if (!modal_busy) {
+    name_input.focus();
+    name_input.select();
+  }
 
   let selected_existing_id: string | null = state.current_level_id;
   const sync_existing_highlight = () => {
@@ -832,10 +898,11 @@ function render_save_modal(): void {
       item.type = "button";
       item.className = "save-existing-item sprite-item";
       item.dataset.levelId = level.id;
+      item.disabled = modal_busy;
 
       const badge = document.createElement("span");
       badge.className = "save-existing-badge";
-      badge.textContent = "LV";
+      badge.textContent = level.source === "cloud" ? "DB" : "LV";
       item.appendChild(badge);
 
       const glyph = document.createElement("span");
@@ -859,6 +926,9 @@ function render_save_modal(): void {
       item.appendChild(details);
 
       item.addEventListener("click", () => {
+        if (modal_busy) {
+          return;
+        }
         selected_existing_id = level.id;
         name_input.value = level.name;
         sync_existing_highlight();
@@ -874,24 +944,54 @@ function render_save_modal(): void {
   name_input.addEventListener("input", () => {
     sync_selected_from_input();
   });
-  cancel_btn.addEventListener("click", () => close_modal());
+  cancel_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
+    close_modal();
+  });
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    save_current_level(name_input.value, save_mode);
+    if (modal_busy) {
+      return;
+    }
+    void save_current_level(name_input.value, save_mode);
   });
 }
 
-function render_load_modal(): void {
+async function render_load_modal(): Promise<void> {
+  if (state.modal_state.kind !== "load") {
+    return;
+  }
+
+  const render_epoch = next_modal_render_epoch();
   Dom.set_modal_title(refs, "Load Level");
+  refs.modal_body.innerHTML = `<div class="modal-loading">Loading levels...</div>`;
+
+  let levels: T.PersistedLevel[] = [];
+  let error_text = modal_error_text;
+  try {
+    levels = sorted_levels(await Store.search_levels(level_search_query));
+  } catch (err) {
+    error_text = `Storage error: ${String(err)}`;
+  }
+
+  if (!is_modal_render_active("load", render_epoch)) {
+    return;
+  }
+
+  ensure_load_selection(levels);
+
   refs.modal_body.innerHTML = `
     <div class="library-toolbar">
-      <input id="library-search" class="library-search" type="text" placeholder="Search level name..." />
+      <input id="library-search" class="library-search" type="text" placeholder="Search level name..." ${modal_busy ? "disabled" : ""} />
       <div class="sort-segment" role="tablist" aria-label="Sort levels">
-        <button id="sort-recent" class="sort-segment-btn" type="button">Recent</button>
-        <button id="sort-name" class="sort-segment-btn" type="button">A-Z</button>
+        <button id="sort-recent" class="sort-segment-btn" type="button" ${modal_busy ? "disabled" : ""}>Recent</button>
+        <button id="sort-name" class="sort-segment-btn" type="button" ${modal_busy ? "disabled" : ""}>A-Z</button>
       </div>
     </div>
     <div id="load-error" class="modal-error"></div>
+    ${modal_busy ? `<p class="modal-inline-status">${escape_html(modal_busy_text || "Working...")}</p>` : ""}
     <div id="level-grid" class="level-grid"></div>
   `;
 
@@ -902,18 +1002,9 @@ function render_load_modal(): void {
   const grid = refs.modal_body.querySelector("#level-grid") as HTMLDivElement;
 
   search.value = level_search_query;
-  error_el.textContent = modal_error_text;
+  error_el.textContent = error_text;
   sort_recent.classList.toggle("active", state.level_sort_mode === "recent");
   sort_name.classList.toggle("active", state.level_sort_mode === "name");
-
-  let levels: T.PersistedLevel[] = [];
-  try {
-    levels = Store.search_levels(level_search_query);
-  } catch (err) {
-    error_el.textContent = `Storage error: ${String(err)}`;
-  }
-  levels = sorted_levels(levels);
-  ensure_load_selection(levels);
 
   grid.innerHTML = "";
   if (levels.length === 0) {
@@ -931,16 +1022,25 @@ function render_load_modal(): void {
   }
 
   search.addEventListener("input", () => {
+    if (modal_busy) {
+      return;
+    }
     level_search_query = search.value;
-    render_load_modal();
+    void render_load_modal();
   });
   sort_recent.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
     state.level_sort_mode = "recent";
-    render_load_modal();
+    void render_load_modal();
   });
   sort_name.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
     state.level_sort_mode = "name";
-    render_load_modal();
+    void render_load_modal();
   });
 }
 
@@ -950,7 +1050,7 @@ function toggle_load_sort(direction: "forward" | "backward"): void {
   const delta = direction === "forward" ? 1 : -1;
   const next_index = (current_index + delta + order.length) % order.length;
   state.level_sort_mode = order[next_index];
-  render_load_modal();
+  void render_load_modal();
 }
 
 function load_search_is_focused(): boolean {
@@ -1050,29 +1150,40 @@ function move_load_selection(direction: "left" | "right" | "up" | "down"): void 
 }
 
 function activate_selected_load_level(): void {
-  if (state.modal_state.kind !== "load" || !load_selected_level_id) {
+  if (state.modal_state.kind !== "load" || !load_selected_level_id || modal_busy) {
     return;
   }
   request_level_load(load_selected_level_id);
 }
 
-function render_rename_modal(level_id: string): void {
-  const level = find_level(level_id);
+async function render_rename_modal(level_id: string): Promise<void> {
+  if (state.modal_state.kind !== "rename") {
+    return;
+  }
+
+  const render_epoch = next_modal_render_epoch();
+  Dom.set_modal_title(refs, "Rename Level");
+  refs.modal_body.innerHTML = `<div class="modal-loading">Loading level...</div>`;
+
+  const level = await find_level(level_id);
+  if (!is_modal_render_active("rename", render_epoch)) {
+    return;
+  }
   if (!level) {
     modal_error_text = "Level no longer exists.";
     set_modal_state({ kind: "load" });
     return;
   }
 
-  Dom.set_modal_title(refs, "Rename Level");
   refs.modal_body.innerHTML = `
     <form id="rename-form" class="modal-form">
       <label class="modal-field-label" for="rename-level-name">New Name</label>
-      <input id="rename-level-name" class="modal-input" type="text" maxlength="80" />
+      <input id="rename-level-name" class="modal-input" type="text" maxlength="80" ${modal_busy ? "disabled" : ""} />
       <div id="rename-error" class="modal-error"></div>
+      ${modal_busy ? `<p class="modal-inline-status">${escape_html(modal_busy_text || "Working...")}</p>` : ""}
       <div class="modal-actions">
-        <button id="rename-cancel" class="modal-btn" type="button">Back</button>
-        <button class="modal-btn primary" type="submit">Rename</button>
+        <button id="rename-cancel" class="modal-btn" type="button" ${modal_busy ? "disabled" : ""}>Back</button>
+        <button class="modal-btn primary" type="submit" ${modal_busy ? "disabled" : ""}>Rename</button>
       </div>
     </form>
   `;
@@ -1083,96 +1194,165 @@ function render_rename_modal(level_id: string): void {
   const cancel_btn = refs.modal_body.querySelector("#rename-cancel") as HTMLButtonElement;
   error_el.textContent = modal_error_text;
   name_input.value = level.name;
-  name_input.focus();
-  name_input.select();
+  if (!modal_busy) {
+    name_input.focus();
+    name_input.select();
+  }
 
   cancel_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
     modal_error_text = "";
     set_modal_state({ kind: "load" });
   });
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    try {
-      const renamed = Store.rename_level(level.id, name_input.value);
-      if (!renamed) {
-        modal_error_text = "Level not found.";
-        render_rename_modal(level_id);
-        return;
-      }
-      if (state.current_level_id === renamed.id) {
-        state.current_level_name = renamed.name;
-        refresh_map_name();
-      }
-      modal_error_text = "";
-      set_modal_state({ kind: "load" });
-      refresh_status();
-    } catch (err) {
-      modal_error_text = `Rename failed: ${String(err)}`;
-      render_rename_modal(level_id);
+    if (modal_busy) {
+      return;
     }
+    void (async () => {
+      set_modal_busy(true, "Renaming...");
+      try {
+        const renamed = await Store.rename_level(level.id, name_input.value);
+        if (!renamed) {
+          set_modal_busy(false);
+          modal_error_text = "Level not found.";
+          void render_rename_modal(level_id);
+          return;
+        }
+        if (state.current_level_id === renamed.id) {
+          state.current_level_name = renamed.name;
+          state.current_level_version = renamed.version;
+          refresh_map_name();
+        }
+        modal_error_text = "";
+        set_modal_busy(false);
+        set_modal_state({ kind: "load" });
+        refresh_status();
+      } catch (err) {
+        set_modal_busy(false);
+        modal_error_text = `Rename failed: ${String(err)}`;
+        void render_rename_modal(level_id);
+      }
+    })();
   });
 }
 
-function render_confirm_discard_modal(level_id: string): void {
-  const level = find_level(level_id);
-  const target_name = level ? level.name : "this level";
+async function render_confirm_discard_modal(level_id: string): Promise<void> {
+  if (state.modal_state.kind !== "confirm-discard") {
+    return;
+  }
+
+  const render_epoch = next_modal_render_epoch();
   Dom.set_modal_title(refs, "Discard Unsaved Changes?");
+  refs.modal_body.innerHTML = `<div class="modal-loading">Loading level...</div>`;
+
+  const level = await find_level(level_id);
+  if (!is_modal_render_active("confirm-discard", render_epoch)) {
+    return;
+  }
+  const target_name = level ? level.name : "this level";
   refs.modal_body.innerHTML = `
     <p class="confirm-copy">
       You have unsaved changes. Loading <strong>${escape_html(target_name)}</strong> will replace the current level.
     </p>
+    ${modal_busy ? `<p class="modal-inline-status">${escape_html(modal_busy_text || "Working...")}</p>` : ""}
     <div class="modal-actions">
-      <button id="discard-cancel" class="modal-btn" type="button">Cancel</button>
-      <button id="discard-confirm" class="modal-btn danger" type="button">Load Anyway</button>
+      <button id="discard-cancel" class="modal-btn" type="button" ${modal_busy ? "disabled" : ""}>Cancel</button>
+      <button id="discard-confirm" class="modal-btn danger" type="button" ${modal_busy ? "disabled" : ""}>Load Anyway</button>
     </div>
   `;
 
   const cancel_btn = refs.modal_body.querySelector("#discard-cancel") as HTMLButtonElement;
   const confirm_btn = refs.modal_body.querySelector("#discard-confirm") as HTMLButtonElement;
-  cancel_btn.addEventListener("click", () => set_modal_state({ kind: "load" }));
-  confirm_btn.addEventListener("click", () => apply_level_from_library(level_id));
+  cancel_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
+    set_modal_state({ kind: "load" });
+  });
+  confirm_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
+    void (async () => {
+      set_modal_busy(true, "Loading...");
+      try {
+        await apply_level_from_library(level_id);
+      } finally {
+        set_modal_busy(false);
+      }
+    })();
+  });
 }
 
-function render_confirm_delete_modal(level_id: string): void {
-  const level = find_level(level_id);
-  const target_name = level ? level.name : "this level";
+async function render_confirm_delete_modal(level_id: string): Promise<void> {
+  if (state.modal_state.kind !== "confirm-delete") {
+    return;
+  }
+
+  const render_epoch = next_modal_render_epoch();
   Dom.set_modal_title(refs, "Delete Level?");
+  refs.modal_body.innerHTML = `<div class="modal-loading">Loading level...</div>`;
+
+  const level = await find_level(level_id);
+  if (!is_modal_render_active("confirm-delete", render_epoch)) {
+    return;
+  }
+  const target_name = level ? level.name : "this level";
   refs.modal_body.innerHTML = `
     <p class="confirm-copy">
-      Delete <strong>${escape_html(target_name)}</strong> from local storage?
+      Delete <strong>${escape_html(target_name)}</strong> from storage?
       This action cannot be undone.
     </p>
+    ${modal_busy ? `<p class="modal-inline-status">${escape_html(modal_busy_text || "Working...")}</p>` : ""}
     <div class="modal-actions">
-      <button id="delete-cancel" class="modal-btn" type="button">Cancel</button>
-      <button id="delete-confirm" class="modal-btn danger" type="button">Delete</button>
+      <button id="delete-cancel" class="modal-btn" type="button" ${modal_busy ? "disabled" : ""}>Cancel</button>
+      <button id="delete-confirm" class="modal-btn danger" type="button" ${modal_busy ? "disabled" : ""}>Delete</button>
     </div>
   `;
 
   const cancel_btn = refs.modal_body.querySelector("#delete-cancel") as HTMLButtonElement;
   const confirm_btn = refs.modal_body.querySelector("#delete-confirm") as HTMLButtonElement;
-  cancel_btn.addEventListener("click", () => set_modal_state({ kind: "load" }));
-  confirm_btn.addEventListener("click", () => {
-    try {
-      const deleted = Store.delete_level(level_id);
-      if (!deleted) {
-        modal_error_text = "Level not found.";
-        set_modal_state({ kind: "load" });
-        return;
-      }
-      if (state.current_level_id === level_id) {
-        state.current_level_id = null;
-        state.current_level_name = null;
-        state.last_persisted_raw = "";
-        state.is_dirty = true;
-        refresh_map_name();
-        refresh_status();
-      }
-      modal_error_text = "";
-      set_modal_state({ kind: "load" });
-    } catch (err) {
-      modal_error_text = `Delete failed: ${String(err)}`;
-      set_modal_state({ kind: "load" });
+  cancel_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
     }
+    set_modal_state({ kind: "load" });
+  });
+  confirm_btn.addEventListener("click", () => {
+    if (modal_busy) {
+      return;
+    }
+    void (async () => {
+      set_modal_busy(true, "Deleting...");
+      try {
+        const deleted = await Store.delete_level(level_id);
+        if (!deleted) {
+          set_modal_busy(false);
+          modal_error_text = "Level not found.";
+          set_modal_state({ kind: "load" });
+          return;
+        }
+        if (state.current_level_id === level_id) {
+          state.current_level_id = null;
+          state.current_level_name = null;
+          state.current_level_version = null;
+          state.last_persisted_raw = "";
+          state.is_dirty = true;
+          refresh_map_name();
+          refresh_status();
+        }
+        modal_error_text = "";
+        set_modal_busy(false);
+        set_modal_state({ kind: "load" });
+      } catch (err) {
+        set_modal_busy(false);
+        modal_error_text = `Delete failed: ${String(err)}`;
+        set_modal_state({ kind: "load" });
+      }
+    })();
   });
 }
 
@@ -1197,19 +1377,19 @@ function render_modal(): void {
   ].filter(Boolean).join(" ");
   switch (kind) {
     case "save":
-      render_save_modal();
+      void render_save_modal();
       return;
     case "load":
-      render_load_modal();
+      void render_load_modal();
       return;
     case "rename":
-      render_rename_modal(state.modal_state.level_id);
+      void render_rename_modal(state.modal_state.level_id);
       return;
     case "confirm-discard":
-      render_confirm_discard_modal(state.modal_state.level_id);
+      void render_confirm_discard_modal(state.modal_state.level_id);
       return;
     case "confirm-delete":
-      render_confirm_delete_modal(state.modal_state.level_id);
+      void render_confirm_delete_modal(state.modal_state.level_id);
       return;
     default:
       return;
@@ -1842,7 +2022,7 @@ function on_visual_pointer_up(ev: PointerEvent): void {
 }
 
 function bind_events(): void {
-  refs.action_save_btn.addEventListener("click", () => request_save_action());
+  refs.action_save_btn.addEventListener("click", () => void request_save_action());
   refs.action_save_as_btn.addEventListener("click", () => request_save_as_action());
   refs.action_load_btn.addEventListener("click", () => open_load_modal(true));
   refs.mode_raw_btn.addEventListener("click", () => set_mode("raw"));
@@ -1986,7 +2166,7 @@ function bind_events(): void {
       load_search_focused: load_search_is_focused()
     }),
     system_save: () => {
-      request_save_action();
+      void request_save_action();
     },
     system_save_as: () => {
       request_save_as_action();
@@ -2055,6 +2235,19 @@ async function init_tokens(): Promise<void> {
   }
 }
 
+async function init_storage(): Promise<void> {
+  try {
+    await Store.initialize_storage();
+  } catch (err) {
+    modal_error_text = `Storage init failed: ${String(err)}`;
+  } finally {
+    refresh_status();
+    if (modal_is_open()) {
+      render_modal();
+    }
+  }
+}
+
 function bootstrap(): void {
   sync_raw_textarea_with_state();
   Dom.set_mode_ui(refs, state.mode);
@@ -2069,6 +2262,7 @@ function bootstrap(): void {
   bind_events();
   refresh_interaction_ui();
   refresh_status();
+  void init_storage();
   void init_tokens();
 }
 
