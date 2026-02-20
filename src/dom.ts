@@ -22,6 +22,7 @@ export interface DomRefs {
   visual_stage: HTMLDivElement;
   visual_grid: HTMLDivElement;
   visual_overlay: HTMLDivElement;
+  door_inspector_layer: HTMLDivElement;
   paint_panel: HTMLDivElement;
   sprite_search: HTMLInputElement;
   sprite_list: HTMLDivElement;
@@ -115,6 +116,7 @@ export function mount_app(root: HTMLElement): DomRefs {
             <div id="visual-stage" class="visual-stage">
               <div id="visual-grid" class="visual-grid"></div>
               <div id="visual-overlay" class="visual-overlay"></div>
+              <div id="door-inspector-layer" class="door-inspector-layer"></div>
             </div>
           </div>
           <div id="raw-panel" class="panel raw-panel">
@@ -161,6 +163,7 @@ export function mount_app(root: HTMLElement): DomRefs {
     visual_stage: root.querySelector("#visual-stage") as HTMLDivElement,
     visual_grid: root.querySelector("#visual-grid") as HTMLDivElement,
     visual_overlay: root.querySelector("#visual-overlay") as HTMLDivElement,
+    door_inspector_layer: root.querySelector("#door-inspector-layer") as HTMLDivElement,
     paint_panel: root.querySelector("#paint-panel") as HTMLDivElement,
     sprite_search: root.querySelector("#sprite-search") as HTMLInputElement,
     sprite_list: root.querySelector("#sprite-list") as HTMLDivElement,

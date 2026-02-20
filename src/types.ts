@@ -86,6 +86,13 @@ export interface GlyphToken {
   label: string;
 }
 
+export interface DoorInspectorMeta {
+  destination: string;
+}
+
+export type DoorInspectorStore = Record<string, Record<string, DoorInspectorMeta>>;
+export type DoorInspectorDismissed = Set<string>;
+
 export interface EditorState {
   grid: GridState;
   mode: ViewMode;

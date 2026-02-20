@@ -176,17 +176,20 @@ export function move_single_cell(
   from_y: number,
   to_x: number,
   to_y: number
-): void {
+): "moved" | "noop" {
   if (!in_bounds(grid, from_x, from_y) || !in_bounds(grid, to_x, to_y)) {
-    return;
+    return "noop";
+  }
+  if (from_x === to_x && from_y === to_y) {
+    return "noop";
   }
   const from = St.grid_get(grid, from_x, from_y);
   if (!from || St.is_empty_cell(from)) {
-    return;
+    return "noop";
   }
   const to = St.grid_get(grid, to_x, to_y);
   if (!to) {
-    return;
+    return "noop";
   }
 
   St.grid_set(grid, to_x, to_y, from);
@@ -194,6 +197,7 @@ export function move_single_cell(
     floor: Raw.EMPTY_FLOOR,
     entity: Raw.EMPTY_ENTITY
   });
+  return "moved";
 }
 
 export function move_rect(

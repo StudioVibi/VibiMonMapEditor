@@ -23,6 +23,7 @@ export interface VisualRenderer {
     invalid?: boolean
   ): void;
   stage_rect(): DOMRect;
+  tile_rect(x: number, y: number): DOMRect | null;
   zoom_to_point(next_zoom: number, client_x: number, client_y: number): T.ViewportState;
 }
 
@@ -218,6 +219,14 @@ export function create_visual_renderer(
 
   function stage_rect(): DOMRect {
     return stage_el.getBoundingClientRect();
+  }
+
+  function tile_rect(x: number, y: number): DOMRect | null {
+    const tile = tile_dom.get(cell_key(x, y));
+    if (!tile) {
+      return null;
+    }
+    return tile.getBoundingClientRect();
   }
 
   function hit_test(client_x: number, client_y: number): { x: number; y: number } | null {
@@ -435,6 +444,7 @@ export function create_visual_renderer(
     set_move_preview,
     set_paint_preview,
     stage_rect,
+    tile_rect,
     zoom_to_point
   };
 }

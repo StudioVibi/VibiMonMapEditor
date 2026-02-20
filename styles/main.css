@@ -753,6 +753,122 @@ body {
   inset: 0;
 }
 
+.door-inspector-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.door-inspector-card {
+  position: absolute;
+  width: 220px;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.24),
+    0 0 0 1px rgba(139, 92, 246, 0.1) inset;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.door-inspector-header {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  background: rgba(139, 92, 246, 0.12);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+.door-inspector-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4c1d95;
+  letter-spacing: 0.02em;
+}
+
+.door-inspector-close {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #5b21b6;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: url("../assets/cursors/Pointer.svg") 4 4, pointer;
+}
+
+.door-inspector-close:hover {
+  background: rgba(139, 92, 246, 0.16);
+}
+
+.door-inspector-body {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.door-inspector-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(30, 27, 75, 0.82);
+}
+
+.door-inspector-input {
+  width: 100%;
+  height: 30px;
+  border: 1px solid rgba(76, 29, 149, 0.22);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 9px;
+  color: #312e81;
+  font-family: var(--mono);
+  font-size: 12px;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.door-inspector-input:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.45);
+  outline-offset: 1px;
+}
+
+.door-inspector-save {
+  justify-self: end;
+  height: 28px;
+  min-width: 66px;
+  border: 1px solid rgba(76, 29, 149, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #6b21a8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: url("../assets/cursors/Pointer.svg") 4 4, pointer;
+}
+
+.door-inspector-save:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.14);
+}
+
+.door-inspector-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.door-inspector-save.active {
+  border-color: rgba(76, 29, 149, 0.62);
+  background: rgba(139, 92, 246, 0.18);
+  color: #4c1d95;
+}
+
 .tile-cell {
   position: absolute;
   border: 1px solid #d6d6dc;

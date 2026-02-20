@@ -17,6 +17,11 @@ const raw_font_default_px = 13;
 const preview_tile_size = 12;
 const preview_frame_width = 300;
 const preview_frame_height = 144;
+const door_inspector_width_px = 220;
+const door_inspector_gap_px = 10;
+const door_inspector_padding_px = 8;
+const door_inspector_stagger_px = 14;
+const door_inspector_door_id = "000";
 
 const date_formatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -47,6 +52,12 @@ let load_selected_level_id: string | null = null;
 let modal_error_text = "";
 let status_flash_text: string | null = null;
 let status_flash_timer: number | null = null;
+const draft_level_session_key = `draft:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+const door_inspector_store: T.DoorInspectorStore = {};
+let door_inspector_dismissed: T.DoorInspectorDismissed = new Set();
+let door_inspector_selection_signature = "";
+let door_inspector_visible_tiles: Array<{ x: number; y: number; key: string; card: HTMLDivElement }> =
+  [];
 
 let pointer_drag:
   | null
@@ -106,6 +117,7 @@ let pointer_drag:
       start_y: number;
       delta_x: number;
       delta_y: number;
+      started_on_empty: boolean;
     } = null;
 
 function cell_key(x: number, y: number): string {
@@ -124,6 +136,423 @@ function clamp_delta_for_rect(rect: T.SelectionRect, dx: number, dy: number): [n
   const ndx = Math.max(min_dx, Math.min(max_dx, dx));
   const ndy = Math.max(min_dy, Math.min(max_dy, dy));
   return [ndx, ndy];
+}
+
+function parse_cell_key(key: string): { x: number; y: number } | null {
+  const [x_raw, y_raw] = key.split(",");
+  const x = Number.parseInt(x_raw, 10);
+  const y = Number.parseInt(y_raw, 10);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return { x, y };
+}
+
+function level_session_key_from_level_id(level_id: string | null): string {
+  return level_id || draft_level_session_key;
+}
+
+function current_level_session_key(): string {
+  return level_session_key_from_level_id(state.current_level_id);
+}
+
+function clone_level_door_store(
+  source: Record<string, T.DoorInspectorMeta>
+): Record<string, T.DoorInspectorMeta> {
+  const out: Record<string, T.DoorInspectorMeta> = {};
+  for (const [tile_key, meta] of Object.entries(source)) {
+    out[tile_key] = { destination: meta.destination };
+  }
+  return out;
+}
+
+function get_level_door_store(
+  level_key: string,
+  create: boolean
+): Record<string, T.DoorInspectorMeta> | null {
+  const existing = door_inspector_store[level_key];
+  if (existing) {
+    return existing;
+  }
+  if (!create) {
+    return null;
+  }
+  const created: Record<string, T.DoorInspectorMeta> = {};
+  door_inspector_store[level_key] = created;
+  return created;
+}
+
+function cleanup_level_door_store(level_key: string): void {
+  const level_store = door_inspector_store[level_key];
+  if (!level_store) {
+    return;
+  }
+  if (Object.keys(level_store).length === 0) {
+    delete door_inspector_store[level_key];
+  }
+}
+
+function read_door_destination(tile_key: string): string {
+  const level_store = get_level_door_store(current_level_session_key(), false);
+  if (!level_store) {
+    return "";
+  }
+  return level_store[tile_key]?.destination || "";
+}
+
+function write_door_destination(tile_key: string, destination: string): void {
+  const level_key = current_level_session_key();
+  const level_store = get_level_door_store(level_key, true);
+  if (!level_store) {
+    return;
+  }
+
+  if (!destination) {
+    delete level_store[tile_key];
+    cleanup_level_door_store(level_key);
+    return;
+  }
+
+  level_store[tile_key] = { destination };
+}
+
+function migrate_door_store_after_save(
+  previous_level_id: string | null,
+  next_level_id: string,
+  mode: T.SaveModalMode
+): void {
+  const previous_key = level_session_key_from_level_id(previous_level_id);
+  const next_key = level_session_key_from_level_id(next_level_id);
+  if (previous_key === next_key) {
+    return;
+  }
+
+  const previous_store = get_level_door_store(previous_key, false);
+  if (!previous_store) {
+    return;
+  }
+
+  door_inspector_store[next_key] = clone_level_door_store(previous_store);
+
+  const was_draft = previous_level_id === null;
+  if (was_draft || mode !== "save-as") {
+    delete door_inspector_store[previous_key];
+  }
+}
+
+function prune_door_metadata_for_current_level(): void {
+  const level_key = current_level_session_key();
+  const level_store = get_level_door_store(level_key, false);
+  if (!level_store) {
+    return;
+  }
+
+  for (const tile_key of Object.keys(level_store)) {
+    const point = parse_cell_key(tile_key);
+    if (!point) {
+      delete level_store[tile_key];
+      continue;
+    }
+    const cell = St.grid_get(state.grid, point.x, point.y);
+    if (!cell || cell.entity !== Raw.DOOR_ENTITY) {
+      delete level_store[tile_key];
+    }
+  }
+
+  cleanup_level_door_store(level_key);
+}
+
+function move_door_metadata_single(from_x: number, from_y: number, to_x: number, to_y: number): void {
+  if (from_x === to_x && from_y === to_y) {
+    return;
+  }
+  const level_key = current_level_session_key();
+  const level_store = get_level_door_store(level_key, false);
+  if (!level_store) {
+    return;
+  }
+
+  const from_key = cell_key(from_x, from_y);
+  const meta = level_store[from_key];
+  if (!meta) {
+    return;
+  }
+  delete level_store[from_key];
+  level_store[cell_key(to_x, to_y)] = meta;
+}
+
+function move_door_metadata_rect(origin: T.SelectionRect, delta_x: number, delta_y: number): void {
+  if (delta_x === 0 && delta_y === 0) {
+    return;
+  }
+  const level_key = current_level_session_key();
+  const level_store = get_level_door_store(level_key, false);
+  if (!level_store) {
+    return;
+  }
+
+  const pending: Array<{ from_key: string; to_key: string; meta: T.DoorInspectorMeta }> = [];
+  for (let y = 0; y < origin.h; y++) {
+    for (let x = 0; x < origin.w; x++) {
+      const source_x = origin.x + x;
+      const source_y = origin.y + y;
+      const from_key = cell_key(source_x, source_y);
+      const meta = level_store[from_key];
+      if (!meta) {
+        continue;
+      }
+
+      const to_x = source_x + delta_x;
+      const to_y = source_y + delta_y;
+      if (to_x < 0 || to_y < 0 || to_x >= state.grid.width || to_y >= state.grid.height) {
+        delete level_store[from_key];
+        continue;
+      }
+
+      pending.push({
+        from_key,
+        to_key: cell_key(to_x, to_y),
+        meta
+      });
+    }
+  }
+
+  for (const move of pending) {
+    delete level_store[move.from_key];
+  }
+  for (const move of pending) {
+    level_store[move.to_key] = move.meta;
+  }
+}
+
+function selection_signature(rect: T.SelectionRect | null): string {
+  if (!rect) {
+    return "";
+  }
+  return `${rect.x}:${rect.y}:${rect.w}:${rect.h}`;
+}
+
+function selected_door_tiles(rect: T.SelectionRect): Array<{ x: number; y: number; key: string }> {
+  const out: Array<{ x: number; y: number; key: string }> = [];
+  for (let y = rect.y; y < rect.y + rect.h; y++) {
+    for (let x = rect.x; x < rect.x + rect.w; x++) {
+      const cell = St.grid_get(state.grid, x, y);
+      if (!cell || cell.entity !== Raw.DOOR_ENTITY) {
+        continue;
+      }
+      out.push({ x, y, key: cell_key(x, y) });
+    }
+  }
+  return out;
+}
+
+function sanitize_destination_input(value: string): string {
+  return value.replace(/\D/g, "").slice(0, 3);
+}
+
+function clear_door_inspector_layer(): void {
+  refs.door_inspector_layer.innerHTML = "";
+  door_inspector_visible_tiles = [];
+}
+
+function should_show_door_inspectors(): boolean {
+  return state.mode === "visual" && state.tool === "move" && !!state.move_selection;
+}
+
+function rects_overlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function position_door_inspectors(): void {
+  if (door_inspector_visible_tiles.length === 0) {
+    return;
+  }
+
+  const stage_rect = visual.stage_rect();
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+
+  for (const item of door_inspector_visible_tiles) {
+    const tile_rect = visual.tile_rect(item.x, item.y);
+    if (!tile_rect) {
+      item.card.style.display = "none";
+      continue;
+    }
+
+    item.card.style.display = "block";
+    const card_w = item.card.offsetWidth || door_inspector_width_px;
+    const card_h = item.card.offsetHeight || 134;
+    const viewport_w = Math.max(stage_rect.width, card_w + door_inspector_padding_px * 2);
+    const viewport_h = Math.max(stage_rect.height, card_h + door_inspector_padding_px * 2);
+
+    let x = tile_rect.right - stage_rect.left + door_inspector_gap_px;
+    if (x + card_w > viewport_w - door_inspector_padding_px) {
+      x = tile_rect.left - stage_rect.left - card_w - door_inspector_gap_px;
+    }
+    x = Math.max(door_inspector_padding_px, Math.min(viewport_w - card_w - door_inspector_padding_px, x));
+
+    let y = tile_rect.top - stage_rect.top;
+    y = Math.max(door_inspector_padding_px, Math.min(viewport_h - card_h - door_inspector_padding_px, y));
+
+    const current = { x, y, w: card_w, h: card_h };
+    let attempts = 0;
+    while (placed.some((other) => rects_overlap(current, other)) && attempts < 24) {
+      current.y += door_inspector_stagger_px;
+      if (current.y + current.h > viewport_h - door_inspector_padding_px) {
+        current.y = door_inspector_padding_px;
+      }
+      attempts += 1;
+    }
+
+    item.card.style.left = `${Math.round(current.x)}px`;
+    item.card.style.top = `${Math.round(current.y)}px`;
+    placed.push(current);
+  }
+}
+
+function create_door_inspector_card(tile: { x: number; y: number; key: string }): HTMLDivElement {
+  const card = document.createElement("article");
+  card.className = "door-inspector-card";
+  card.dataset.tileKey = tile.key;
+
+  const header = document.createElement("div");
+  header.className = "door-inspector-header";
+
+  const title = document.createElement("div");
+  title.className = "door-inspector-title";
+  title.textContent = `Door ID: ${door_inspector_door_id}`;
+
+  const close_btn = document.createElement("button");
+  close_btn.type = "button";
+  close_btn.className = "door-inspector-close";
+  close_btn.setAttribute("aria-label", "Close inspector");
+  close_btn.textContent = "X";
+
+  header.appendChild(title);
+  header.appendChild(close_btn);
+
+  const body = document.createElement("div");
+  body.className = "door-inspector-body";
+
+  const destination_label = document.createElement("label");
+  destination_label.className = "door-inspector-label";
+  destination_label.textContent = "Destination ID";
+
+  const destination_input = document.createElement("input");
+  destination_input.className = "door-inspector-input";
+  destination_input.type = "text";
+  destination_input.inputMode = "numeric";
+  destination_input.maxLength = 3;
+  destination_input.placeholder = "000";
+
+  const save_btn = document.createElement("button");
+  save_btn.type = "button";
+  save_btn.className = "door-inspector-save";
+  save_btn.textContent = "Save";
+
+  body.appendChild(destination_label);
+  body.appendChild(destination_input);
+  body.appendChild(save_btn);
+
+  card.appendChild(header);
+  card.appendChild(body);
+  card.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  card.addEventListener("pointerup", (ev) => ev.stopPropagation());
+  card.addEventListener("click", (ev) => ev.stopPropagation());
+
+  let saved_destination = read_door_destination(tile.key);
+  destination_input.value = saved_destination;
+
+  const refresh_save_state = (): void => {
+    const sanitized = sanitize_destination_input(destination_input.value);
+    if (destination_input.value !== sanitized) {
+      destination_input.value = sanitized;
+    }
+    const is_valid = sanitized === "" || sanitized.length === 3;
+    const has_change = sanitized !== saved_destination;
+    save_btn.disabled = !is_valid || !has_change;
+    save_btn.classList.toggle("active", !save_btn.disabled);
+  };
+
+  destination_input.addEventListener("input", () => {
+    refresh_save_state();
+  });
+
+  save_btn.addEventListener("click", () => {
+    const sanitized = sanitize_destination_input(destination_input.value);
+    const is_valid = sanitized === "" || sanitized.length === 3;
+    if (!is_valid || sanitized === saved_destination) {
+      refresh_save_state();
+      return;
+    }
+
+    write_door_destination(tile.key, sanitized);
+    saved_destination = sanitized;
+    destination_input.value = sanitized;
+    refresh_save_state();
+    flash_status(
+      sanitized
+        ? `Door destination saved (${tile.x}, ${tile.y}) -> ${sanitized}.`
+        : `Door destination cleared (${tile.x}, ${tile.y}).`
+    );
+  });
+
+  close_btn.addEventListener("click", () => {
+    door_inspector_dismissed.add(tile.key);
+    render_door_inspectors();
+  });
+
+  refresh_save_state();
+  return card;
+}
+
+function render_door_inspectors(): void {
+  if (!should_show_door_inspectors()) {
+    door_inspector_selection_signature = "";
+    door_inspector_dismissed = new Set();
+    clear_door_inspector_layer();
+    return;
+  }
+
+  const selection = state.move_selection;
+  if (!selection) {
+    clear_door_inspector_layer();
+    return;
+  }
+
+  const signature = selection_signature(selection);
+  if (signature !== door_inspector_selection_signature) {
+    door_inspector_selection_signature = signature;
+    door_inspector_dismissed = new Set();
+  }
+
+  const doors = selected_door_tiles(selection);
+  clear_door_inspector_layer();
+  if (doors.length === 0) {
+    return;
+  }
+
+  for (const tile of doors) {
+    if (door_inspector_dismissed.has(tile.key)) {
+      continue;
+    }
+    const card = create_door_inspector_card(tile);
+    refs.door_inspector_layer.appendChild(card);
+    door_inspector_visible_tiles.push({
+      ...tile,
+      card
+    });
+  }
+
+  position_door_inspectors();
+}
+
+function set_move_selection(rect: T.SelectionRect | null): void {
+  state.move_selection = rect;
+  visual.set_selection(rect);
+  render_door_inspectors();
 }
 
 function sprite_id(name: string, ix: number, iy: number): string {
@@ -265,14 +694,17 @@ function paint_preview_for_cell(cell: { x: number; y: number } | null): void {
 }
 
 function rebuild_visual(): void {
+  prune_door_metadata_for_current_level();
   visual.rebuild_grid(state.grid, token_by_key);
   visual.set_transform(state.viewport);
   visual.set_selection(state.move_selection);
   clear_move_preview();
   visual.set_paint_preview(null);
+  render_door_inspectors();
 }
 
 function sync_grid_and_views(): void {
+  prune_door_metadata_for_current_level();
   visual.refresh_grid(state.grid, token_by_key);
   St.sync_raw_from_grid(state);
   update_dirty_flag();
@@ -280,6 +712,7 @@ function sync_grid_and_views(): void {
     sync_raw_textarea_with_state();
   }
   Dom.set_raw_error(refs, state.raw_error);
+  render_door_inspectors();
   refresh_status();
 }
 
@@ -453,6 +886,7 @@ function set_saved_level_state(level: T.PersistedLevel): void {
   state.last_persisted_raw = state.raw_text;
   update_dirty_flag();
   refresh_map_name();
+  render_door_inspectors();
   refresh_status();
 }
 
@@ -471,8 +905,10 @@ function persist_level(name: string, id: string | null): T.PersistedLevel {
 
 function save_current_level(name: string, mode: T.SaveModalMode): void {
   try {
+    const previous_level_id = state.current_level_id;
     const target_id = mode === "save-as" ? null : state.current_level_id;
     const saved = persist_level(name, target_id);
+    migrate_door_store_after_save(previous_level_id, saved.id, mode);
     set_saved_level_state(saved);
     close_modal();
     const prefix = mode === "save-as" ? "Saved as" : "Saved";
@@ -537,14 +973,14 @@ function apply_level_from_library(level_id: string): void {
   state.grid = parsed.grid;
   state.last_valid_grid = Raw.clone_grid(parsed.grid);
   state.raw_error = null;
-  state.move_selection = null;
+  state.current_level_id = level.id;
+  state.current_level_name = level.name;
+  state.last_persisted_raw = level.raw_text;
+  set_move_selection(null);
+  prune_door_metadata_for_current_level();
   sync_raw_textarea_with_state();
   Dom.set_raw_error(refs, null);
   rebuild_visual();
-
-  state.current_level_id = level.id;
-  state.current_level_name = level.name;
-  state.last_persisted_raw = state.raw_text;
   update_dirty_flag();
   refresh_map_name();
   refresh_status();
@@ -1319,6 +1755,7 @@ function set_mode(mode: T.ViewMode): void {
   }
 
   refresh_interaction_ui();
+  render_door_inspectors();
   refresh_status();
 }
 
@@ -1328,8 +1765,9 @@ function set_tool(tool: T.Tool): void {
   clear_move_preview();
   visual.set_paint_preview(null);
   if (tool !== "move") {
-    state.move_selection = null;
-    visual.set_selection(null);
+    set_move_selection(null);
+  } else {
+    render_door_inspectors();
   }
   refresh_interaction_ui();
   refresh_status();
@@ -1588,6 +2026,8 @@ function on_visual_pointer_down(ev: PointerEvent): void {
     return;
   }
 
+  const source = St.grid_get(state.grid, cell.x, cell.y);
+  const source_is_empty = !source || St.is_empty_cell(source);
   const existing = state.move_selection;
   if (existing && in_rect(cell.x, cell.y, existing)) {
     pointer_drag = {
@@ -1596,12 +2036,12 @@ function on_visual_pointer_down(ev: PointerEvent): void {
       start_x: cell.x,
       start_y: cell.y,
       delta_x: 0,
-      delta_y: 0
+      delta_y: 0,
+      started_on_empty: source_is_empty
     };
     return;
   }
 
-  const source = St.grid_get(state.grid, cell.x, cell.y);
   if (source && !St.is_empty_cell(source)) {
     pointer_drag = {
       kind: "move_single",
@@ -1610,11 +2050,12 @@ function on_visual_pointer_down(ev: PointerEvent): void {
       to_x: cell.x,
       to_y: cell.y
     };
-    state.move_selection = null;
+    set_move_selection(null);
     visual.set_selection({ x: cell.x, y: cell.y, w: 1, h: 1 });
     return;
   }
 
+  set_move_selection(null);
   pointer_drag = {
     kind: "move_select",
     start_x: cell.x,
@@ -1639,6 +2080,7 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     state.viewport.offset_x = pointer_drag.base_offset_x + dx;
     state.viewport.offset_y = pointer_drag.base_offset_y + dy;
     visual.set_transform(state.viewport);
+    position_door_inspectors();
     return;
   }
 
@@ -1875,54 +2317,84 @@ function on_visual_pointer_up(ev: PointerEvent): void {
   }
 
   if (pointer_drag.kind === "move_single") {
-    Tools.move_single_cell(
+    const gesture = pointer_drag;
+    const result = Tools.move_single_cell(
       state.grid,
-      pointer_drag.from_x,
-      pointer_drag.from_y,
-      pointer_drag.to_x,
-      pointer_drag.to_y
+      gesture.from_x,
+      gesture.from_y,
+      gesture.to_x,
+      gesture.to_y
     );
-    state.move_selection = null;
-    visual.set_selection(null);
     pointer_drag = null;
     clear_move_preview();
     visual.set_paint_preview(null);
+
+    if (result === "noop") {
+      const source = St.grid_get(state.grid, gesture.from_x, gesture.from_y);
+      if (source && !St.is_empty_cell(source)) {
+        set_move_selection({ x: gesture.from_x, y: gesture.from_y, w: 1, h: 1 });
+      } else {
+        set_move_selection(null);
+      }
+      refresh_status();
+      return;
+    }
+
+    move_door_metadata_single(gesture.from_x, gesture.from_y, gesture.to_x, gesture.to_y);
+    set_move_selection(null);
     sync_grid_and_views();
     return;
   }
 
   if (pointer_drag.kind === "move_select") {
+    const gesture = pointer_drag;
     const rect = St.normalize_rect(
-      pointer_drag.start_x,
-      pointer_drag.start_y,
-      pointer_drag.end_x,
-      pointer_drag.end_y
+      gesture.start_x,
+      gesture.start_y,
+      gesture.end_x,
+      gesture.end_y
     );
-    state.move_selection = rect;
-    visual.set_selection(rect);
     pointer_drag = null;
     clear_move_preview();
     visual.set_paint_preview(null);
+    const is_click = gesture.start_x === gesture.end_x && gesture.start_y === gesture.end_y;
+    if (is_click) {
+      set_move_selection(null);
+    } else {
+      set_move_selection(rect);
+    }
     refresh_status();
     return;
   }
 
+  const gesture = pointer_drag;
   const [dx, dy] = clamp_delta_for_rect(
-    pointer_drag.origin,
-    pointer_drag.delta_x,
-    pointer_drag.delta_y
+    gesture.origin,
+    gesture.delta_x,
+    gesture.delta_y
   );
-  Tools.move_rect(state.grid, pointer_drag.origin, dx, dy);
-  state.move_selection = {
-    x: pointer_drag.origin.x + dx,
-    y: pointer_drag.origin.y + dy,
-    w: pointer_drag.origin.w,
-    h: pointer_drag.origin.h
-  };
-  visual.set_selection(state.move_selection);
   pointer_drag = null;
   clear_move_preview();
   visual.set_paint_preview(null);
+  const next_selection = {
+    x: gesture.origin.x + dx,
+    y: gesture.origin.y + dy,
+    w: gesture.origin.w,
+    h: gesture.origin.h
+  };
+  if (dx === 0 && dy === 0) {
+    if (gesture.started_on_empty) {
+      set_move_selection(null);
+    } else {
+      set_move_selection(next_selection);
+    }
+    refresh_status();
+    return;
+  }
+
+  Tools.move_rect(state.grid, gesture.origin, dx, dy);
+  move_door_metadata_rect(gesture.origin, dx, dy);
+  set_move_selection(next_selection);
   sync_grid_and_views();
 }
 
@@ -2024,7 +2496,12 @@ function bind_events(): void {
     const next_zoom = state.viewport.zoom * factor;
     state.viewport = visual.zoom_to_point(next_zoom, ev.clientX, ev.clientY);
     visual.set_transform(state.viewport);
+    position_door_inspectors();
   });
+
+  refs.visual_stage.addEventListener("scroll", () => {
+    position_door_inspectors();
+  }, { passive: true });
 
   window.addEventListener("keydown", (ev) => {
     const in_text_entry = is_text_entry_target(ev.target);
@@ -2042,6 +2519,7 @@ function bind_events(): void {
     if (ev.key === "0") {
       state.viewport = { zoom: 1, offset_x: 0, offset_y: 0 };
       visual.set_transform(state.viewport);
+      position_door_inspectors();
     }
     if (ev.key === "Control" || ev.key === "Meta") {
       refs.visual_stage.classList.add("is-zoom-key");
@@ -2063,6 +2541,10 @@ function bind_events(): void {
     if (ev.key === "Control" || ev.key === "Meta") {
       refs.visual_stage.classList.remove("is-zoom-key");
     }
+  });
+
+  window.addEventListener("resize", () => {
+    position_door_inspectors();
   });
 
   Shortcuts.bind_shortcuts({
