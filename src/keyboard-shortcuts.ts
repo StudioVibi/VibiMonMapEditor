@@ -14,6 +14,8 @@ export interface ShortcutHandlers {
   system_save: () => void;
   system_save_as: () => void;
   system_load: () => void;
+  system_undo: () => void;
+  system_redo: () => void;
   set_tool: (tool: Tool) => void;
   navigate_glyphs: (direction: "up" | "down") => void;
   select_highlighted_glyph: () => void;
@@ -192,6 +194,16 @@ export function bind_shortcuts(handlers: ShortcutHandlers): () => void {
     if (is_primary_combo(ev, "o", false)) {
       consume(ev);
       handlers.system_load();
+      return;
+    }
+    if (is_primary_combo(ev, "z", false)) {
+      consume(ev);
+      handlers.system_undo();
+      return;
+    }
+    if (is_primary_combo(ev, "y", false)) {
+      consume(ev);
+      handlers.system_redo();
       return;
     }
 

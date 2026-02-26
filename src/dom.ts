@@ -91,7 +91,7 @@ export function mount_app(root: HTMLElement): DomRefs {
         <section class="workspace">
           <div id="visual-panel" class="panel visual-panel active">
             <div class="visual-toolbar">
-              <span class="visual-toolbar-hints">Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab</span>
+              <span class="visual-toolbar-hints">Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab | Undo: Ctrl+Z | Redo: Ctrl+Y</span>
               <div class="visual-toolbar-actions">
                 <label class="sync-toggle" for="sync-view">
                   <input id="sync-view" class="sync-toggle-input" type="checkbox" />
