@@ -1,6 +1,7 @@
 import * as Dom from "./dom";
 import * as Cam from "./camera-sync";
 import * as Cat from "./glyph-catalog";
+import * as History from "./history";
 import * as Shortcuts from "./keyboard-shortcuts";
 import * as Store from "./level-storage";
 import * as Raw from "./raw-format";
@@ -263,6 +264,30 @@ function rebuild_visual(): void {
   visual.set_selection(state.move_selection);
   clear_move_preview();
   visual.set_paint_preview(null);
+}
+
+function perform_undo(): void {
+  const restored = History.undo(state.grid);
+  if (!restored) {
+    return;
+  }
+  state.grid = restored;
+  state.move_selection = null;
+  sync_grid_and_views();
+  rebuild_visual();
+  flash_status("Undo");
+}
+
+function perform_redo(): void {
+  const restored = History.redo(state.grid);
+  if (!restored) {
+    return;
+  }
+  state.grid = restored;
+  state.move_selection = null;
+  sync_grid_and_views();
+  rebuild_visual();
+  flash_status("Redo");
 }
 
 function sync_grid_and_views(): void {
@@ -531,6 +556,7 @@ function apply_level_from_library(level_id: string): void {
   state.last_valid_grid = Raw.clone_grid(parsed.grid);
   state.raw_error = null;
   state.move_selection = null;
+  History.clear();
   sync_raw_textarea_with_state();
   Dom.set_raw_error(refs, null);
   rebuild_visual();
@@ -1747,6 +1773,7 @@ function on_visual_pointer_up(ev: PointerEvent): void {
         pointer_drag.end_x,
         pointer_drag.end_y
       );
+      History.push_snapshot(state.grid);
       Tools.apply_paint_rect(state.grid, rect, token);
       sync_grid_and_views();
     }
@@ -1764,6 +1791,7 @@ function on_visual_pointer_up(ev: PointerEvent): void {
       pointer_drag.end_x,
       pointer_drag.end_y
     );
+    History.push_snapshot(state.grid);
     Tools.apply_collider_rect(state.grid, rect);
     visual.set_selection(null);
     pointer_drag = null;
@@ -1780,6 +1808,7 @@ function on_visual_pointer_up(ev: PointerEvent): void {
       pointer_drag.end_x,
       pointer_drag.end_y
     );
+    History.push_snapshot(state.grid);
     Tools.apply_erase_rect(state.grid, rect);
     visual.set_selection(null);
     pointer_drag = null;
@@ -1790,6 +1819,7 @@ function on_visual_pointer_up(ev: PointerEvent): void {
   }
 
   if (pointer_drag.kind === "move_single") {
+    History.push_snapshot(state.grid);
     Tools.move_single_cell(
       state.grid,
       pointer_drag.from_x,
@@ -1827,6 +1857,7 @@ function on_visual_pointer_up(ev: PointerEvent): void {
     pointer_drag.delta_x,
     pointer_drag.delta_y
   );
+  History.push_snapshot(state.grid);
   Tools.move_rect(state.grid, pointer_drag.origin, dx, dy);
   state.move_selection = {
     x: pointer_drag.origin.x + dx,
@@ -1873,6 +1904,7 @@ function bind_events(): void {
     raw_timer = window.setTimeout(() => {
       raw_timer = null;
       const canonical_raw = raw_from_textarea(refs.raw_textarea.value);
+      History.push_snapshot(state.grid);
       St.sync_grid_from_raw(state, canonical_raw);
       Dom.set_raw_error(refs, state.raw_error);
       if (!state.raw_error) {
@@ -1993,6 +2025,12 @@ function bind_events(): void {
     },
     system_load: () => {
       open_load_modal(true);
+    },
+    system_undo: () => {
+      perform_undo();
+    },
+    system_redo: () => {
+      perform_redo();
     },
     set_tool: (tool) => {
       set_tool(tool);
