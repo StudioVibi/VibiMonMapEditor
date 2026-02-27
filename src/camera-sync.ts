@@ -121,10 +121,14 @@ export function measure_raw_metrics(textarea: HTMLTextAreaElement): T.RawViewpor
   const font_size_px = to_px(computed.fontSize, 13);
   const char_width_px = measure_char_width(textarea, font_size_px);
   const line_height_px = measure_line_height(textarea, font_size_px);
+  const padding_left_px = to_px(computed.paddingLeft, 0);
+  const padding_top_px = to_px(computed.paddingTop, 0);
   return {
     font_size_px,
     char_width_px,
     line_height_px,
+    padding_left_px,
+    padding_top_px,
     scroll_left: textarea.scrollLeft,
     scroll_top: textarea.scrollTop
   };
@@ -176,11 +180,13 @@ export function camera_to_raw_scroll(
 ): { left: number; top: number } {
   const char_width = Math.max(1, raw_metrics.char_width_px);
   const line_height = Math.max(1, raw_metrics.line_height_px);
+  const padding_left = Math.max(0, raw_metrics.padding_left_px);
+  const padding_top = Math.max(0, raw_metrics.padding_top_px);
   const char_center = camera.center_tile_x * 4 + 2;
   const line_center = camera.center_tile_y * 2 + 1;
 
-  const left = char_center * char_width - viewport.client_width / 2;
-  const top = line_center * line_height - viewport.client_height / 2;
+  const left = char_center * char_width + padding_left - viewport.client_width / 2;
+  const top = line_center * line_height + padding_top - viewport.client_height / 2;
 
   const max_left = Math.max(0, viewport.scroll_width - viewport.client_width);
   const max_top = Math.max(0, viewport.scroll_height - viewport.client_height);
@@ -197,9 +203,13 @@ export function raw_scroll_to_camera(
 ): T.SharedCameraState {
   const char_width = Math.max(1, raw_metrics.char_width_px);
   const line_height = Math.max(1, raw_metrics.line_height_px);
+  const padding_left = Math.max(0, raw_metrics.padding_left_px);
+  const padding_top = Math.max(0, raw_metrics.padding_top_px);
 
-  const char_center = (raw_metrics.scroll_left + viewport.client_width / 2) / char_width;
-  const line_center = (raw_metrics.scroll_top + viewport.client_height / 2) / line_height;
+  const char_center =
+    (raw_metrics.scroll_left + viewport.client_width / 2 - padding_left) / char_width;
+  const line_center =
+    (raw_metrics.scroll_top + viewport.client_height / 2 - padding_top) / line_height;
 
   return {
     center_tile_x: (char_center - 2) / 4,

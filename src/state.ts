@@ -40,6 +40,8 @@ export function create_initial_state(): T.EditorState {
       font_size_px: 13,
       char_width_px: 8,
       line_height_px: 15.6,
+      padding_left_px: 10,
+      padding_top_px: 10,
       scroll_left: 0,
       scroll_top: 0
     },
@@ -113,6 +115,7 @@ export function sync_grid_from_raw(state: T.EditorState, raw_text: string): void
     return;
   }
   state.grid = parsed.grid;
+  state.raw_text = Raw.serialize_raw(parsed.grid);
   state.last_valid_grid = Raw.clone_grid(parsed.grid);
   state.raw_error = null;
   if (state.move_selection) {

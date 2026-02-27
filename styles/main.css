@@ -194,7 +194,9 @@ body {
 .tool-btn:focus-visible,
 #sprite-search:focus-visible,
 .sprite-item:focus-visible,
-#raw-text:focus-visible {
+#raw-text:focus-visible,
+.raw-sync-copy-btn:focus-visible,
+.raw-sync-stage:focus-visible {
   outline: 2px solid var(--ios-focus-ring);
   outline-offset: 1px;
 }
@@ -550,6 +552,16 @@ body {
 }
 
 .workspace {
+  display: grid;
+  grid-template-rows: 40px 1fr;
+  min-height: 0;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+.workspace-panels {
   min-height: 0;
   height: 100%;
   position: relative;
@@ -573,8 +585,7 @@ body {
 }
 
 .visual-panel.active {
-  display: grid;
-  grid-template-rows: 40px 1fr;
+  display: block;
 }
 
 .visual-toolbar {
@@ -878,6 +889,80 @@ body {
   gap: 8px;
 }
 
+.raw-panel.active.raw-sync-active {
+  display: block;
+  padding: 0;
+}
+
+.raw-sync-shell {
+  display: none;
+  height: 100%;
+}
+
+.raw-sync-shell.active {
+  display: block;
+  height: 100%;
+}
+
+.raw-sync-copy-btn {
+  min-width: 88px;
+}
+
+.raw-sync-stage {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  background: var(--canvas);
+  cursor: url("../assets/cursors/Arrow.svg") 2 2, default;
+  scrollbar-gutter: stable both-edges;
+}
+
+.raw-sync-stage.is-panning {
+  cursor: url("../assets/cursors/Grab.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), grab;
+}
+
+.raw-sync-stage.is-grabbing {
+  cursor: url("../assets/cursors/Grabbed.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), grabbing;
+}
+
+.raw-sync-stage.is-zoom-key {
+  cursor: url("../assets/cursors/ZoomIn.svg") var(--cursor-hotspot-x) var(--cursor-hotspot-y), zoom-in;
+}
+
+.raw-sync-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.raw-sync-content {
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
+  background: color-mix(in srgb, var(--ios-surface-0) 94%, var(--ios-bg-canvas));
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.7) inset;
+}
+
+.raw-sync-line {
+  position: absolute;
+  left: 0;
+  display: flex;
+}
+
+.raw-sync-char {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(21, 26, 34, 0.72);
+  user-select: none;
+}
+
 #raw-text {
   width: 100%;
   height: 100%;
@@ -893,6 +978,16 @@ body {
   box-shadow: var(--ios-shadow-inset);
   white-space: pre;
   word-break: normal;
+}
+
+.hidden-by-sync {
+  display: none !important;
+}
+
+#raw-text.raw-locked {
+  background: color-mix(in srgb, var(--ios-surface-0) 84%, var(--ios-bg-canvas));
+  color: color-mix(in srgb, var(--ios-text-primary) 86%, var(--ios-text-secondary));
+  caret-color: transparent;
 }
 
 .raw-error {

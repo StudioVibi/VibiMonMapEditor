@@ -5,6 +5,7 @@ import * as History from "./history";
 import * as Shortcuts from "./keyboard-shortcuts";
 import * as Store from "./level-storage";
 import * as Raw from "./raw-format";
+import * as RawSync from "./raw-sync-render";
 import * as St from "./state";
 import * as Tools from "./tools";
 import type * as T from "./types";
@@ -34,6 +35,11 @@ const visual = Visual.create_visual_renderer(
   refs.visual_stage,
   refs.visual_grid,
   refs.visual_overlay
+);
+const raw_sync = RawSync.create_raw_sync_renderer(
+  refs.raw_sync_stage,
+  refs.raw_sync_world,
+  refs.raw_sync_content
 );
 const state = St.create_initial_state();
 let tokens: T.GlyphToken[] = [];
@@ -100,6 +106,15 @@ let pointer_drag:
       start_y: number;
       delta_x: number;
       delta_y: number;
+    } = null;
+
+let raw_sync_drag:
+  | null
+  | {
+      start_x: number;
+      start_y: number;
+      base_offset_x: number;
+      base_offset_y: number;
     } = null;
 
 function cell_key(x: number, y: number): string {
@@ -173,10 +188,11 @@ function refresh_status(): void {
       : escape_html(state.current_level_name);
   }
 
+  const sync_status = state.sync_view.enabled ? "Sync ON • RAW Sync View" : "Sync OFF";
   const segments = [
     `Level: ${level_html}`,
     `Mode: ${state.mode.toUpperCase()}`,
-    `Sync: ${state.sync_view.enabled ? "ON" : "OFF"}`,
+    sync_status,
     `Tool: ${state.tool}`,
     `Grid: ${state.grid.width}x${state.grid.height}`
   ];
@@ -229,8 +245,30 @@ function raw_from_textarea(raw: string): string {
   return unescape_raw_from_typescript(raw);
 }
 
+function is_raw_locked(): boolean {
+  return state.sync_view.enabled;
+}
+
+function is_raw_sync_active(): boolean {
+  return state.mode === "raw" && state.sync_view.enabled;
+}
+
 function sync_raw_textarea_with_state(): void {
   refs.raw_textarea.value = raw_for_textarea(state.raw_text);
+}
+
+function sync_raw_sync_renderer(rebuild: boolean): void {
+  const text = raw_for_textarea(state.raw_text);
+  if (rebuild) {
+    raw_sync.rebuild(state.grid, text);
+    return;
+  }
+  raw_sync.refresh(state.grid, text);
+}
+
+function apply_shared_viewport(): void {
+  visual.set_transform(state.viewport);
+  raw_sync.set_transform(state.viewport);
 }
 
 function refresh_interaction_ui(): void {
@@ -238,6 +276,7 @@ function refresh_interaction_ui(): void {
   const blocked = state.mode === "visual" && state.tool === "paint" && !state.selected_token;
   refs.visual_stage.classList.toggle("is-action-blocked", blocked);
   refs.visual_stage.classList.toggle("is-panning", is_space_down);
+  refs.raw_sync_stage.classList.toggle("is-panning", is_space_down);
 }
 
 function clear_move_preview(): void {
@@ -260,7 +299,8 @@ function paint_preview_for_cell(cell: { x: number; y: number } | null): void {
 
 function rebuild_visual(): void {
   visual.rebuild_grid(state.grid, token_by_key);
-  visual.set_transform(state.viewport);
+  sync_raw_sync_renderer(true);
+  apply_shared_viewport();
   visual.set_selection(state.move_selection);
   clear_move_preview();
   visual.set_paint_preview(null);
@@ -293,130 +333,13 @@ function perform_redo(): void {
 function sync_grid_and_views(): void {
   visual.refresh_grid(state.grid, token_by_key);
   St.sync_raw_from_grid(state);
+  sync_raw_sync_renderer(false);
   update_dirty_flag();
-  if (state.mode === "raw") {
+  if (state.mode === "raw" && !state.sync_view.enabled) {
     sync_raw_textarea_with_state();
   }
   Dom.set_raw_error(refs, state.raw_error);
   refresh_status();
-}
-
-function clamp_camera_to_grid(camera: T.SharedCameraState): T.SharedCameraState {
-  const max_x = Math.max(0, state.grid.width - 1);
-  const max_y = Math.max(0, state.grid.height - 1);
-  return {
-    center_tile_x: Math.max(0, Math.min(max_x, camera.center_tile_x)),
-    center_tile_y: Math.max(0, Math.min(max_y, camera.center_tile_y)),
-    visual_zoom: camera.visual_zoom
-  };
-}
-
-function capture_camera_from_visual(): void {
-  const stage = visual.stage_rect();
-  const scroll_left = refs.visual_stage.scrollLeft;
-  const scroll_top = refs.visual_stage.scrollTop;
-  const viewport = {
-    zoom: state.viewport.zoom,
-    offset_x: state.viewport.offset_x - scroll_left,
-    offset_y: state.viewport.offset_y - scroll_top
-  };
-  state.shared_camera = clamp_camera_to_grid(
-    Cam.visual_to_camera(viewport, { width: stage.width, height: stage.height })
-  );
-}
-
-function capture_camera_from_raw(): void {
-  const metrics = Cam.measure_raw_metrics(refs.raw_textarea);
-  state.raw_viewport = metrics;
-  const viewport = Cam.read_raw_viewport_size(refs.raw_textarea);
-  const visual_zoom = Cam.raw_font_px_to_visual_zoom(metrics.font_size_px, metrics);
-  state.shared_camera = clamp_camera_to_grid(
-    Cam.raw_scroll_to_camera(metrics, viewport, visual_zoom)
-  );
-}
-
-function apply_camera_to_visual(): void {
-  const stage = visual.stage_rect();
-  const scroll_left = refs.visual_stage.scrollLeft;
-  const scroll_top = refs.visual_stage.scrollTop;
-  const viewport = Cam.camera_to_visual(
-    state.shared_camera,
-    { width: stage.width, height: stage.height }
-  );
-  state.viewport = {
-    zoom: viewport.zoom,
-    offset_x: viewport.offset_x + scroll_left,
-    offset_y: viewport.offset_y + scroll_top
-  };
-}
-
-function raw_selection_range_for_tile(tile_x: number, tile_y: number): { start: number; end: number } | null {
-  if (tile_x < 0 || tile_y < 0) {
-    return null;
-  }
-  const raw_lines = state.raw_text.split("\n");
-  const line_index = tile_y * 2 + 1;
-  if (line_index < 0 || line_index >= raw_lines.length) {
-    return null;
-  }
-
-  const line = raw_lines[line_index];
-  if (!line) {
-    return null;
-  }
-
-  const tile_count = Math.floor(line.length / 4);
-  if (tile_count <= 0) {
-    return null;
-  }
-
-  const target_tile = Math.max(0, Math.min(tile_count - 1, tile_x));
-  let start_col = 0;
-  for (let x = 0; x < target_tile; x++) {
-    const token = line.slice(x * 4, x * 4 + 3);
-    start_col += raw_for_textarea(token).length + 1;
-  }
-
-  const target_token = line.slice(target_tile * 4, target_tile * 4 + 3);
-  const cell_width = raw_for_textarea(target_token).length + 1;
-
-  let offset = 0;
-  for (let i = 0; i < line_index; i++) {
-    offset += raw_for_textarea(raw_lines[i]).length + 1;
-  }
-
-  const display_line = raw_for_textarea(line);
-  const start = offset + start_col;
-  const end = Math.min(start + cell_width, offset + display_line.length);
-  if (end <= start) {
-    return null;
-  }
-  return { start, end };
-}
-
-function focus_raw_tile_from_camera(): void {
-  const tile_x = Math.max(0, Math.min(state.grid.width - 1, Math.floor(state.shared_camera.center_tile_x)));
-  const tile_y = Math.max(0, Math.min(state.grid.height - 1, Math.floor(state.shared_camera.center_tile_y)));
-  const range = raw_selection_range_for_tile(tile_x, tile_y);
-  if (!range) {
-    return;
-  }
-  refs.raw_textarea.setSelectionRange(range.start, range.end);
-}
-
-function apply_camera_to_raw(): void {
-  const base_metrics = Cam.measure_raw_metrics(refs.raw_textarea);
-  const target_font = Cam.visual_zoom_to_raw_font_px(state.shared_camera.visual_zoom, base_metrics);
-  const clamped_font = Math.max(raw_font_min_px, Math.min(raw_font_max_px, target_font));
-  refs.raw_textarea.style.fontSize = `${clamped_font}px`;
-
-  const next_metrics = Cam.measure_raw_metrics(refs.raw_textarea);
-  const viewport = Cam.read_raw_viewport_size(refs.raw_textarea);
-  const scroll = Cam.camera_to_raw_scroll(state.shared_camera, next_metrics, viewport);
-  refs.raw_textarea.scrollLeft = scroll.left;
-  refs.raw_textarea.scrollTop = scroll.top;
-  state.raw_viewport = Cam.measure_raw_metrics(refs.raw_textarea);
-  focus_raw_tile_from_camera();
 }
 
 function reset_raw_zoom_to_default(): void {
@@ -569,7 +492,11 @@ function apply_level_from_library(level_id: string): void {
   refresh_status();
 
   if (state.mode === "raw") {
-    refs.raw_textarea.focus();
+    if (state.sync_view.enabled) {
+      refs.raw_sync_stage.focus();
+    } else {
+      refs.raw_textarea.focus();
+    }
   }
   close_modal();
 }
@@ -1243,12 +1170,61 @@ function render_modal(): void {
 }
 
 function set_sync_view_enabled(enabled: boolean): void {
+  if (state.sync_view.enabled === enabled) {
+    Dom.set_sync_view_ui(refs, enabled);
+    Dom.set_raw_locked_ui(refs, enabled);
+    Dom.set_raw_sync_mode_ui(refs, is_raw_sync_active());
+    Dom.set_copy_raw_ui(refs, is_raw_sync_active());
+    refresh_status();
+    return;
+  }
+
+  if (raw_timer !== null) {
+    window.clearTimeout(raw_timer);
+    raw_timer = null;
+  }
+
+  let discarded_invalid_raw = false;
+  if (enabled) {
+    if (state.mode === "raw") {
+      const canonical_raw = raw_from_textarea(refs.raw_textarea.value);
+      St.sync_grid_from_raw(state, canonical_raw);
+    }
+    if (state.raw_error) {
+      state.grid = Raw.clone_grid(state.last_valid_grid);
+      St.sync_raw_from_grid(state);
+      state.raw_error = null;
+      discarded_invalid_raw = true;
+    }
+    sync_raw_textarea_with_state();
+  }
+
   state.sync_view.enabled = enabled;
   Dom.set_sync_view_ui(refs, enabled);
+  Dom.set_raw_locked_ui(refs, is_raw_locked());
+  Dom.set_raw_sync_mode_ui(refs, is_raw_sync_active());
+  Dom.set_copy_raw_ui(refs, is_raw_sync_active());
+  sync_raw_textarea_with_state();
+  sync_raw_sync_renderer(true);
+  apply_shared_viewport();
+
   if (!enabled) {
     reset_raw_zoom_to_default();
   }
+  if (state.mode === "raw") {
+    if (enabled) {
+      refs.raw_sync_stage.focus();
+    } else {
+      refs.raw_textarea.focus();
+    }
+  }
+
+  Dom.set_raw_error(refs, state.raw_error);
+  update_dirty_flag();
   refresh_status();
+  if (discarded_invalid_raw) {
+    flash_status("Sync ON • RAW reset to last valid snapshot");
+  }
 }
 
 function toggle_sync_view(): void {
@@ -1264,7 +1240,7 @@ function set_add_escape_char_enabled(enabled: boolean): void {
   let selection_start = 0;
   let selection_end = 0;
   let canonical_raw = state.raw_text;
-  if (state.mode === "raw") {
+  if (state.mode === "raw" && !state.sync_view.enabled) {
     selection_start = refs.raw_textarea.selectionStart;
     selection_end = refs.raw_textarea.selectionEnd;
     canonical_raw = raw_from_textarea(refs.raw_textarea.value);
@@ -1279,18 +1255,27 @@ function set_add_escape_char_enabled(enabled: boolean): void {
   Dom.set_add_escape_char_ui(refs, enabled);
 
   if (state.mode === "raw") {
-    St.sync_grid_from_raw(state, canonical_raw);
-    Dom.set_raw_error(refs, state.raw_error);
-    if (!state.raw_error) {
-      rebuild_visual();
+    if (!state.sync_view.enabled) {
+      St.sync_grid_from_raw(state, canonical_raw);
+      Dom.set_raw_error(refs, state.raw_error);
+      if (!state.raw_error) {
+        rebuild_visual();
+      }
     }
     sync_raw_textarea_with_state();
-    const max = refs.raw_textarea.value.length;
-    refs.raw_textarea.setSelectionRange(
-      Math.max(0, Math.min(max, selection_start)),
-      Math.max(0, Math.min(max, selection_end))
-    );
-    refs.raw_textarea.focus();
+    sync_raw_sync_renderer(false);
+    if (state.sync_view.enabled) {
+      refs.raw_sync_stage.focus();
+    } else {
+      const max = refs.raw_textarea.value.length;
+      refs.raw_textarea.setSelectionRange(
+        Math.max(0, Math.min(max, selection_start)),
+        Math.max(0, Math.min(max, selection_end))
+      );
+      refs.raw_textarea.focus();
+    }
+  } else {
+    sync_raw_sync_renderer(false);
   }
 
   update_dirty_flag();
@@ -1310,29 +1295,29 @@ function set_mode(mode: T.ViewMode): void {
     return;
   }
 
-  const from_mode = state.mode;
-  if (state.sync_view.enabled) {
-    if (from_mode === "visual" && mode === "raw") {
-      capture_camera_from_visual();
-    } else if (from_mode === "raw" && mode === "visual") {
-      capture_camera_from_raw();
-    }
-  }
-
   state.mode = mode;
   Dom.set_mode_ui(refs, mode);
+  Dom.set_raw_locked_ui(refs, is_raw_locked());
+  Dom.set_raw_sync_mode_ui(refs, is_raw_sync_active());
+  Dom.set_copy_raw_ui(refs, is_raw_sync_active());
   clear_move_preview();
   visual.set_paint_preview(null);
 
   if (mode === "raw") {
     sync_raw_textarea_with_state();
-    if (state.sync_view.enabled && from_mode === "visual") {
-      apply_camera_to_raw();
+    if (state.sync_view.enabled) {
+      refs.raw_sync_stage.scrollLeft = refs.visual_stage.scrollLeft;
+      refs.raw_sync_stage.scrollTop = refs.visual_stage.scrollTop;
+      sync_raw_sync_renderer(false);
+      apply_shared_viewport();
+      refs.raw_sync_stage.focus();
+    } else {
+      refs.raw_textarea.focus();
     }
-    refs.raw_textarea.focus();
   } else {
-    if (state.sync_view.enabled && from_mode === "raw") {
-      apply_camera_to_visual();
+    if (state.sync_view.enabled) {
+      refs.visual_stage.scrollLeft = refs.raw_sync_stage.scrollLeft;
+      refs.visual_stage.scrollTop = refs.raw_sync_stage.scrollTop;
     }
     rebuild_visual();
   }
@@ -1641,7 +1626,7 @@ function on_visual_pointer_move(ev: PointerEvent): void {
     const dy = ev.clientY - pointer_drag.start_y;
     state.viewport.offset_x = pointer_drag.base_offset_x + dx;
     state.viewport.offset_y = pointer_drag.base_offset_y + dy;
-    visual.set_transform(state.viewport);
+    apply_shared_viewport();
     return;
   }
 
@@ -1872,6 +1857,75 @@ function on_visual_pointer_up(ev: PointerEvent): void {
   sync_grid_and_views();
 }
 
+function on_raw_sync_pointer_down(ev: PointerEvent): void {
+  if (!is_raw_sync_active()) {
+    return;
+  }
+
+  const pan_gesture = is_space_down || ev.button === 1;
+  if (!pan_gesture) {
+    return;
+  }
+
+  raw_sync_drag = {
+    start_x: ev.clientX,
+    start_y: ev.clientY,
+    base_offset_x: state.viewport.offset_x,
+    base_offset_y: state.viewport.offset_y
+  };
+  ev.preventDefault();
+  refs.raw_sync_stage.classList.add("is-grabbing");
+  refs.raw_sync_stage.setPointerCapture(ev.pointerId);
+}
+
+function on_raw_sync_pointer_move(ev: PointerEvent): void {
+  if (!raw_sync_drag || !is_raw_sync_active()) {
+    return;
+  }
+
+  const dx = ev.clientX - raw_sync_drag.start_x;
+  const dy = ev.clientY - raw_sync_drag.start_y;
+  state.viewport.offset_x = raw_sync_drag.base_offset_x + dx;
+  state.viewport.offset_y = raw_sync_drag.base_offset_y + dy;
+  apply_shared_viewport();
+}
+
+function on_raw_sync_pointer_up(ev: PointerEvent): void {
+  if (!raw_sync_drag) {
+    return;
+  }
+
+  if (refs.raw_sync_stage.hasPointerCapture(ev.pointerId)) {
+    refs.raw_sync_stage.releasePointerCapture(ev.pointerId);
+  }
+  refs.raw_sync_stage.classList.remove("is-grabbing");
+  raw_sync_drag = null;
+}
+
+async function copy_raw_snapshot(): Promise<void> {
+  const text = raw_for_textarea(state.raw_text);
+  try {
+    await navigator.clipboard.writeText(text);
+    flash_status(state.add_escape_char.enabled ? "RAW copied with escape chars" : "RAW copied");
+  } catch {
+    const probe = document.createElement("textarea");
+    probe.value = text;
+    probe.style.position = "fixed";
+    probe.style.left = "-9999px";
+    probe.style.top = "-9999px";
+    document.body.appendChild(probe);
+    probe.focus();
+    probe.select();
+    const copied = document.execCommand("copy");
+    probe.remove();
+    if (copied) {
+      flash_status(state.add_escape_char.enabled ? "RAW copied with escape chars" : "RAW copied");
+      return;
+    }
+    flash_status("Copy failed");
+  }
+}
+
 function bind_events(): void {
   refs.action_save_btn.addEventListener("click", () => request_save_action());
   refs.action_save_as_btn.addEventListener("click", () => request_save_as_action());
@@ -1898,6 +1952,10 @@ function bind_events(): void {
   });
 
   refs.raw_textarea.addEventListener("input", () => {
+    if (is_raw_locked()) {
+      sync_raw_textarea_with_state();
+      return;
+    }
     if (raw_timer !== null) {
       window.clearTimeout(raw_timer);
     }
@@ -1933,6 +1991,10 @@ function bind_events(): void {
     if (!ev.ctrlKey && !ev.metaKey) {
       return;
     }
+    if (is_raw_locked()) {
+      ev.preventDefault();
+      return;
+    }
     ev.preventDefault();
     const metrics = Cam.measure_raw_metrics(refs.raw_textarea);
     const factor = ev.deltaY < 0 ? 1.1 : 0.9;
@@ -1943,6 +2005,55 @@ function bind_events(): void {
     refs.raw_textarea.style.fontSize = `${next_font}px`;
     state.raw_viewport = Cam.measure_raw_metrics(refs.raw_textarea);
     refresh_status();
+  }, { passive: false });
+  refs.raw_textarea.addEventListener("beforeinput", (ev) => {
+    if (!is_raw_locked()) {
+      return;
+    }
+    const input_type = (ev as InputEvent).inputType || "";
+    if (input_type.startsWith("insert") || input_type.startsWith("delete") || input_type.startsWith("history")) {
+      ev.preventDefault();
+    }
+  });
+  refs.raw_textarea.addEventListener("paste", (ev) => {
+    if (!is_raw_locked()) {
+      return;
+    }
+    ev.preventDefault();
+  });
+  refs.raw_textarea.addEventListener("drop", (ev) => {
+    if (!is_raw_locked()) {
+      return;
+    }
+    ev.preventDefault();
+  });
+
+  refs.raw_sync_copy_btn.addEventListener("click", () => {
+    void copy_raw_snapshot();
+  });
+  refs.raw_sync_stage.addEventListener("pointerdown", on_raw_sync_pointer_down);
+  refs.raw_sync_stage.addEventListener("pointermove", on_raw_sync_pointer_move);
+  refs.raw_sync_stage.addEventListener("pointerup", on_raw_sync_pointer_up);
+  refs.raw_sync_stage.addEventListener("pointercancel", on_raw_sync_pointer_up);
+  refs.raw_sync_stage.addEventListener("selectstart", (ev) => {
+    ev.preventDefault();
+  });
+  refs.raw_sync_stage.addEventListener("dragstart", (ev) => {
+    ev.preventDefault();
+  });
+  refs.raw_sync_stage.addEventListener("wheel", (ev) => {
+    if (!ev.ctrlKey && !ev.metaKey) {
+      return;
+    }
+    if (!is_raw_sync_active()) {
+      return;
+    }
+    ev.preventDefault();
+    const delta = -ev.deltaY;
+    const factor = delta > 0 ? 1.1 : 0.9;
+    const next_zoom = state.viewport.zoom * factor;
+    state.viewport = raw_sync.zoom_to_point(next_zoom, ev.clientX, ev.clientY);
+    apply_shared_viewport();
   }, { passive: false });
 
   refs.visual_stage.addEventListener("pointerdown", on_visual_pointer_down);
@@ -1969,7 +2080,7 @@ function bind_events(): void {
     const factor = delta > 0 ? 1.1 : 0.9;
     const next_zoom = state.viewport.zoom * factor;
     state.viewport = visual.zoom_to_point(next_zoom, ev.clientX, ev.clientY);
-    visual.set_transform(state.viewport);
+    apply_shared_viewport();
   });
 
   window.addEventListener("keydown", (ev) => {
@@ -1977,6 +2088,7 @@ function bind_events(): void {
     if (in_text_entry || modal_is_open()) {
       if (ev.key === "Control" || ev.key === "Meta") {
         refs.visual_stage.classList.add("is-zoom-key");
+        refs.raw_sync_stage.classList.add("is-zoom-key");
       }
       return;
     }
@@ -1987,10 +2099,11 @@ function bind_events(): void {
     }
     if (ev.key === "0") {
       state.viewport = { zoom: 1, offset_x: 0, offset_y: 0 };
-      visual.set_transform(state.viewport);
+      apply_shared_viewport();
     }
     if (ev.key === "Control" || ev.key === "Meta") {
       refs.visual_stage.classList.add("is-zoom-key");
+      refs.raw_sync_stage.classList.add("is-zoom-key");
     }
   });
 
@@ -1998,6 +2111,7 @@ function bind_events(): void {
     if (is_text_entry_target(ev.target) || modal_is_open()) {
       if (ev.key === "Control" || ev.key === "Meta") {
         refs.visual_stage.classList.remove("is-zoom-key");
+        refs.raw_sync_stage.classList.remove("is-zoom-key");
       }
       return;
     }
@@ -2008,6 +2122,7 @@ function bind_events(): void {
     }
     if (ev.key === "Control" || ev.key === "Meta") {
       refs.visual_stage.classList.remove("is-zoom-key");
+      refs.raw_sync_stage.classList.remove("is-zoom-key");
     }
   });
 
@@ -2095,8 +2210,12 @@ async function init_tokens(): Promise<void> {
 
 function bootstrap(): void {
   sync_raw_textarea_with_state();
+  sync_raw_sync_renderer(true);
   Dom.set_mode_ui(refs, state.mode);
   Dom.set_sync_view_ui(refs, state.sync_view.enabled);
+  Dom.set_raw_locked_ui(refs, is_raw_locked());
+  Dom.set_raw_sync_mode_ui(refs, is_raw_sync_active());
+  Dom.set_copy_raw_ui(refs, is_raw_sync_active());
   Dom.set_add_escape_char_ui(refs, state.add_escape_char.enabled);
   Dom.set_tool_ui(refs, state.tool);
   Dom.set_modal_open(refs, false);

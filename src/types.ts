@@ -34,6 +34,8 @@ export interface RawViewportState {
   font_size_px: number;
   char_width_px: number;
   line_height_px: number;
+  padding_left_px: number;
+  padding_top_px: number;
   scroll_left: number;
   scroll_top: number;
 }

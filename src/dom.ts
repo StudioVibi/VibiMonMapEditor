@@ -15,6 +15,11 @@ export interface DomRefs {
   tool_paint_btn: HTMLButtonElement;
   tool_rubber_btn: HTMLButtonElement;
   raw_panel: HTMLDivElement;
+  raw_sync_shell: HTMLDivElement;
+  raw_sync_stage: HTMLDivElement;
+  raw_sync_world: HTMLDivElement;
+  raw_sync_content: HTMLDivElement;
+  raw_sync_copy_btn: HTMLButtonElement;
   raw_textarea: HTMLTextAreaElement;
   raw_error: HTMLDivElement;
   visual_panel: HTMLDivElement;
@@ -89,30 +94,40 @@ export function mount_app(root: HTMLElement): DomRefs {
           </section>
         </aside>
         <section class="workspace">
-          <div id="visual-panel" class="panel visual-panel active">
-            <div class="visual-toolbar">
-              <span class="visual-toolbar-hints">Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab | Undo: Ctrl+Z | Redo: Ctrl+Y</span>
-              <div class="visual-toolbar-actions">
-                <label class="sync-toggle" for="sync-view">
-                  <input id="sync-view" class="sync-toggle-input" type="checkbox" />
-                  <span class="sync-toggle-track" aria-hidden="true"></span>
-                  <span class="sync-toggle-text">Sync View <span class="sync-toggle-key">(S)</span></span>
-                </label>
-                <label class="sync-toggle" for="add-escape-char">
-                  <input id="add-escape-char" class="sync-toggle-input" type="checkbox" />
-                  <span class="sync-toggle-track" aria-hidden="true"></span>
-                  <span class="sync-toggle-text">Add Escape Char</span>
-                </label>
-              </div>
-            </div>
-            <div id="visual-stage" class="visual-stage">
-              <div id="visual-grid" class="visual-grid"></div>
-              <div id="visual-overlay" class="visual-overlay"></div>
+          <div class="visual-toolbar workspace-toolbar">
+            <span class="visual-toolbar-hints">Pan: Space+Drag | Zoom: Ctrl/Cmd+Wheel | Reset: 0 | Toggle View: Tab | Undo: Ctrl+Z | Redo: Ctrl+Y</span>
+            <div class="visual-toolbar-actions">
+              <label class="sync-toggle" for="sync-view">
+                <input id="sync-view" class="sync-toggle-input" type="checkbox" />
+                <span class="sync-toggle-track" aria-hidden="true"></span>
+                <span class="sync-toggle-text">Sync View <span class="sync-toggle-key">(S)</span></span>
+              </label>
+              <label class="sync-toggle" for="add-escape-char">
+                <input id="add-escape-char" class="sync-toggle-input" type="checkbox" />
+                <span class="sync-toggle-track" aria-hidden="true"></span>
+                <span class="sync-toggle-text">Add Escape Char</span>
+              </label>
+              <button id="raw-sync-copy" class="topbar-action-btn raw-sync-copy-btn" type="button" hidden>Copy RAW</button>
             </div>
           </div>
-          <div id="raw-panel" class="panel raw-panel">
-            <textarea id="raw-text" spellcheck="false" wrap="off"></textarea>
-            <div id="raw-error" class="raw-error"></div>
+          <div class="workspace-panels">
+            <div id="visual-panel" class="panel visual-panel active">
+              <div id="visual-stage" class="visual-stage">
+                <div id="visual-grid" class="visual-grid"></div>
+                <div id="visual-overlay" class="visual-overlay"></div>
+              </div>
+            </div>
+            <div id="raw-panel" class="panel raw-panel">
+              <div id="raw-sync-shell" class="raw-sync-shell">
+                <div id="raw-sync-stage" class="raw-sync-stage" tabindex="0">
+                  <div id="raw-sync-world" class="raw-sync-world">
+                    <div id="raw-sync-content" class="raw-sync-content"></div>
+                  </div>
+                </div>
+              </div>
+              <textarea id="raw-text" spellcheck="false" wrap="off"></textarea>
+              <div id="raw-error" class="raw-error"></div>
+            </div>
           </div>
         </section>
       </main>
@@ -147,6 +162,11 @@ export function mount_app(root: HTMLElement): DomRefs {
     tool_paint_btn: root.querySelector("#tool-paint") as HTMLButtonElement,
     tool_rubber_btn: root.querySelector("#tool-rubber") as HTMLButtonElement,
     raw_panel: root.querySelector("#raw-panel") as HTMLDivElement,
+    raw_sync_shell: root.querySelector("#raw-sync-shell") as HTMLDivElement,
+    raw_sync_stage: root.querySelector("#raw-sync-stage") as HTMLDivElement,
+    raw_sync_world: root.querySelector("#raw-sync-world") as HTMLDivElement,
+    raw_sync_content: root.querySelector("#raw-sync-content") as HTMLDivElement,
+    raw_sync_copy_btn: root.querySelector("#raw-sync-copy") as HTMLButtonElement,
     raw_textarea: root.querySelector("#raw-text") as HTMLTextAreaElement,
     raw_error: root.querySelector("#raw-error") as HTMLDivElement,
     visual_panel: root.querySelector("#visual-panel") as HTMLDivElement,
@@ -180,6 +200,24 @@ export function set_sync_view_ui(refs: DomRefs, enabled: boolean): void {
 
 export function set_add_escape_char_ui(refs: DomRefs, enabled: boolean): void {
   refs.add_escape_char_toggle.checked = enabled;
+}
+
+export function set_copy_raw_ui(refs: DomRefs, visible: boolean): void {
+  refs.raw_sync_copy_btn.hidden = !visible;
+}
+
+export function set_raw_locked_ui(refs: DomRefs, locked: boolean): void {
+  refs.raw_textarea.readOnly = locked;
+  refs.raw_textarea.classList.toggle("raw-locked", locked);
+  refs.raw_textarea.setAttribute("aria-readonly", locked ? "true" : "false");
+  refs.raw_textarea.title = locked ? "Sync View is active. Disable Sync View to edit RAW." : "";
+}
+
+export function set_raw_sync_mode_ui(refs: DomRefs, active: boolean): void {
+  refs.raw_panel.classList.toggle("raw-sync-active", active);
+  refs.raw_sync_shell.classList.toggle("active", active);
+  refs.raw_textarea.classList.toggle("hidden-by-sync", active);
+  refs.raw_error.classList.toggle("hidden-by-sync", active);
 }
 
 export function set_map_name(refs: DomRefs, name: string | null): void {

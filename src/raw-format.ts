@@ -81,13 +81,23 @@ export function serialize_raw(grid: T.GridState): string {
 export function parse_raw(text: string):
   | { ok: true; grid: T.GridState }
   | { ok: false; error: string } {
-  const lines = text
+  const normalized = text
     .split("\n")
-    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line))
-    .filter((line) => line.trim().length > 0);
+    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+
+  let lines = normalized;
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines = lines.slice(0, -1);
+  }
 
   if (lines.length === 0) {
     return { ok: false, error: "RAW is empty." };
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().length === 0) {
+      return { ok: false, error: `Line ${i + 1}: blank lines are not allowed.` };
+    }
   }
 
   if (lines.length % 2 !== 0) {
